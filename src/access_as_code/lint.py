@@ -11,6 +11,8 @@ from .model import Access
 MAX_PERSON_PROD_DAYS = 90
 MAX_ELEVATED_PROD_DAYS = 7
 SOON_DAYS = 14
+# AAC007 matches these role *names*: name your "ships releases" and "approves releases" roles accordingly.
+SOD_ROLES = ("deployer", "approver")
 
 
 @dataclass(frozen=True)
@@ -25,7 +27,7 @@ class Violation:
 
 RULES = {
     "AAC001": "No role may hold the Vault `sudo` capability.",
-    "AAC002": "Grants must reference known teams, environments, roles and subjects.",
+    "AAC002": "References resolve: grants to known objects, group members to people, people to teams.",
     "AAC003": "Production grants need a ticket; direct person grants also need an expiry (max 90 days).",
     "AAC004": "Elevated roles (delete / k8s admin) in production need a ticket and expire within 7 days.",
     "AAC005": "Offboarded people must hold no access, directly or through a group.",
@@ -48,10 +50,18 @@ def lint(acc: Access, today: date) -> list[Violation]:
         if "sudo" in role.vault:
             add("AAC001", "error", f"role '{role.name}' grants the Vault 'sudo' capability")
 
+    for pid, person in sorted(acc.people.items()):
+        if person.team not in acc.teams:
+            add("AAC002", "error", f"person '{pid}': unknown team '{person.team}'")
+    for gname, gmembers in sorted(acc.groups.items()):
+        for pid in gmembers:
+            if pid not in acc.people:
+                add("AAC002", "error", f"group '{gname}': unknown member '{pid}' (not listed under people)")
+
     seen: dict[tuple, int] = {}
     used_roles: set[str] = set()
     used_groups: set[str] = set()
-    prod_roles: dict[tuple[str, str], set[str]] = defaultdict(set)  # (person, team) -> roles on prod
+    prod_roles: dict[tuple[str, str, str], set[str]] = defaultdict(set)  # (person, team, env) -> roles
 
     for g in acc.grants:
         d = g.describe()
@@ -114,11 +124,11 @@ def lint(acc: Access, today: date) -> list[Violation]:
             if person.team != g.team and not g.ticket:
                 add("AAC008", "warning", f"{d}: '{pid}' belongs to team '{person.team}' (no ticket)")
             if prod:
-                prod_roles[(pid, g.team)].add(g.role)
+                prod_roles[(pid, g.team, g.env)].add(g.role)
 
-    for (pid, team), roles in sorted(prod_roles.items()):
-        if {"deployer", "approver"} <= roles:
-            add("AAC007", "error", f"'{pid}' is both deployer and approver on {team}/prod")
+    for (pid, team, env), roles in sorted(prod_roles.items()):
+        if set(SOD_ROLES) <= roles:
+            add("AAC007", "error", f"'{pid}' is both deployer and approver on {team}/{env}")
 
     for name in sorted(set(acc.roles) - used_roles):
         add("AAC010", "info", f"role '{name}' is never granted")

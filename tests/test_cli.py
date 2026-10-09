@@ -89,3 +89,24 @@ def test_schema_rejects_unknown_fields_and_bad_values(doc):
     with pytest.raises(AccessFileError) as e:
         parse(doc)
     assert len(e.value.problems) == 3
+
+
+def test_init_writes_lint_clean_starter_and_refuses_overwrite(tmp_path, capsys):
+    out = tmp_path / "access.yml"
+    assert main(["init", "--out", str(out)]) == 0
+    assert main(["lint", str(out), "--strict"]) == 0
+    assert main(["init", "--out", str(out)]) == 2
+    assert main(["init", "--out", str(tmp_path / "missing" / "a.yml")]) == 2
+
+
+def test_explain(capsys):
+    assert main(["explain", "aac003"]) == 0
+    assert "How to fix" in capsys.readouterr().out
+    assert main(["explain", "AAC999"]) == 2
+
+
+def test_every_rule_has_howto():
+    from access_as_code.howto import HOWTO
+    from access_as_code.lint import RULES
+
+    assert set(HOWTO) == set(RULES)

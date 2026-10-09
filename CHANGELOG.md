@@ -2,6 +2,18 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/).
 
+## [1.1.0] - 2026-10-09
+
+### Added
+- `init` writes a lint-clean starter `access.yml`; `explain AAC0xx` shows how to fix a rule; lint prints a hint.
+- Russian README (`README.ru.md`) with a language switch in both READMEs; quickstart, recipes, snapshot format,
+  FAQ; `examples/ci/gitlab-ci.yml` and `examples/CODEOWNERS`.
+
+### Fixed
+- A group member missing from `people` crashed `lint`/`compile` with a `KeyError`; it is now an AAC002 error.
+- AAC002 also reports a person whose team is not declared.
+- AAC007 reports the actual production environment name and checks each production environment separately.
+
 ## [1.0.0] - 2026-10-08
 
 ### Added

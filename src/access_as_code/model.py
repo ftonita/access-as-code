@@ -70,9 +70,9 @@ class Access:
     grants: tuple[Grant, ...]
 
     def members(self, grant: Grant) -> tuple[str, ...]:
-        """People a grant applies to (unknown subjects resolve to nobody)."""
+        """People a grant applies to. Unknown subjects/members resolve to nobody (`lint` reports AAC002)."""
         if grant.is_group:
-            return self.groups.get(grant.subject_name, ())
+            return tuple(p for p in self.groups.get(grant.subject_name, ()) if p in self.people)
         return (grant.subject_name,) if grant.subject_name in self.people else ()
 
 

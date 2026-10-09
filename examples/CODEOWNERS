@@ -1,0 +1,3 @@
+# Copy to .github/CODEOWNERS or .gitlab/CODEOWNERS. Replace the handles with your own.
+# Nobody can change access without a review from security AND the team leads.
+access.yml  @your-org/security @your-org/team-leads

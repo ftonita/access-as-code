@@ -1,0 +1,36 @@
+# Copy into the repository that holds access.yml (adjust the path/image if needed).
+# Merge request: lint blocks on errors. Default branch: compile and keep the result as an artifact.
+stages: [check, build]
+
+.aac:
+  image: python:3.13-slim
+  before_script:
+    - pip install --quiet git+https://github.com/ftonita/access-as-code.git
+
+lint:
+  extends: .aac
+  stage: check
+  script:
+    - access-as-code lint access.yml          # add --strict to fail on warnings too
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+compile:
+  extends: .aac
+  stage: build
+  script:
+    - access-as-code lint access.yml
+    - access-as-code compile access.yml --out build
+  artifacts:
+    paths: [build/]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Nightly schedule: compare with an exported snapshot (see README, "Drift").
+drift:
+  extends: .aac
+  stage: check
+  script:
+    - access-as-code diff access.yml --actual snapshot.json   # produce snapshot.json from your systems first
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"

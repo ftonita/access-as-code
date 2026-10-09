@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import copy
 from datetime import date
 
 import pytest
 
 from access_as_code.lint import RULES, lint
-from conftest import TODAY, g
+from access_as_code.model import parse
+from conftest import BASE, TODAY, g
 
 
 def rules_of(acc, today=TODAY):
@@ -133,3 +135,13 @@ def test_output_is_sorted_errors_first(bad):
 
 def test_lint_is_pure_wrt_today(bad):
     assert [str(v) for v in lint(bad, TODAY)] == [str(v) for v in lint(bad, date(2026, 10, 8))]
+
+
+def test_group_with_unknown_member_and_person_with_unknown_team_do_not_crash():
+    doc = copy.deepcopy(BASE)
+    doc["groups"] = {"g": ["alice", "typo"]}
+    doc["people"]["alice"]["team"] = "nowhere"
+    doc["grants"] = [{"subject": "group:g", "role": "viewer", "team": "payments", "env": "dev"}]
+    msgs = [v.message for v in lint(parse(doc), TODAY) if v.rule == "AAC002"]
+    assert any("unknown member 'typo'" in m for m in msgs)
+    assert any("unknown team 'nowhere'" in m for m in msgs)

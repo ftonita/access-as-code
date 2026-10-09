@@ -1,4 +1,4 @@
-"""access-as-code: validate | lint | compile | diff | review | rules | demo-state."""
+"""access-as-code: init | validate | lint | explain | compile | diff | review | rules | demo-state."""
 
 from __future__ import annotations
 
@@ -13,8 +13,10 @@ from . import __version__
 from .compile import compile_access, effective, write
 from .demo import make_drifted_state
 from .drift import diff
+from .howto import HOWTO
 from .lint import RULES, lint
 from .model import AccessFileError, load
+from .starter import STARTER
 
 
 def _today(a: argparse.Namespace) -> date:
@@ -37,6 +39,9 @@ def _cmd_lint(a: argparse.Namespace) -> int:
         errs = sum(v.severity == "error" for v in violations)
         warns = sum(v.severity == "warning" for v in violations)
         print(f"{errs} error(s), {warns} warning(s), {len(violations) - errs - warns} info")
+        if errs or warns:
+            first = next(v.rule for v in violations if v.severity in ("error", "warning"))
+            print(f"Tip: `access-as-code explain {first}` shows how to fix a rule.")
     failing = {"error", "warning"} if a.strict else {"error"}
     return 1 if any(v.severity in failing for v in violations) else 0
 
@@ -85,6 +90,28 @@ def _cmd_rules(_: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_explain(a: argparse.Namespace) -> int:
+    rid = a.rule.upper()
+    if rid not in RULES:
+        raise AccessFileError([f"unknown rule '{a.rule}'; run `access-as-code rules` for the list"])
+    print(f"{rid}  {RULES[rid]}\n\nHow to fix: {HOWTO[rid]}")
+    return 0
+
+
+def _cmd_init(a: argparse.Namespace) -> int:
+    path = Path(a.out)
+    text = STARTER.replace("@EXPIRES@", str(_today(a) + timedelta(days=30)))
+    try:
+        with open(path, "x", encoding="utf-8") as fh:
+            fh.write(text)
+    except FileExistsError as exc:
+        raise AccessFileError([f"{path} already exists; refusing to overwrite"]) from exc
+    except OSError as exc:
+        raise AccessFileError([f"cannot write {path}: {exc}"]) from exc
+    print(f"wrote {path}. Next: edit it, then `access-as-code lint {path}`")
+    return 0
+
+
 def _cmd_demo_state(a: argparse.Namespace) -> int:
     state = compile_access(load(a.file), _today(a)).as_state()
     Path(a.out).write_text(json.dumps(make_drifted_state(state), indent=2), encoding="utf-8")
@@ -116,6 +143,11 @@ def build_parser() -> argparse.ArgumentParser:
     add("diff", _cmd_diff, "desired vs actual snapshot").add_argument("--actual", required=True)
     add("review", _cmd_review, "expiring and elevated grants").add_argument("--days", type=int, default=30)
     add("rules", _cmd_rules, "list lint rules", file=False, today=False)
+    explain = add("explain", _cmd_explain, "how to fix a lint rule", file=False, today=False)
+    explain.add_argument("rule", help="e.g. AAC003")
+    add("init", _cmd_init, "write a starter access.yml", file=False).add_argument(
+        "--out", default="access.yml"
+    )
     add("demo-state", _cmd_demo_state, "write a synthetic drifted snapshot").add_argument(
         "--out", default="actual.json"
     )
