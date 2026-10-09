@@ -22,4 +22,7 @@ jobs:
         with: { python-version: "3.13" }
       - run: pip install -e .
       - run: access-as-code lint examples/access.yml --today 2026-10-08
+      - run: access-as-code lint examples/company --today 2026-10-08
+      - run: access-as-code compile examples/company --today 2026-10-08 --out build-company
+      - run: access-as-code schema | diff - schema/access.v2.schema.json
       - run: access-as-code compile examples/access.yml --today 2026-10-08 --out build

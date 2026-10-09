@@ -1,35 +1,45 @@
-"""Template written by `access-as-code init`. Lints clean as-is; replace the sample names with your own."""
+"""Templates written by `access-as-code init`. They lint clean as-is; replace the sample names with your own."""
 
-STARTER = """\
-# access.yml - the single source of truth for who may do what.
-# Every change to this file goes through a merge request. See README for the walkthrough.
-version: 1
+SCHEMA_URL = "https://raw.githubusercontent.com/ftonita/access-as-code/main/schema/access.v2.schema.json"
 
-teams: [myteam]                   # lowercase letters, digits, dashes
+_SCHEMA_LINE = f"# yaml-language-server: $schema={SCHEMA_URL}\n"
+
+_COMMON_BODY = """\
 environments: [dev, stage, prod]
-production_environments: [prod]   # stricter rules apply here (ticket, expiry, separation of duties)
+production_environments: [prod]   # stricter rules apply here: ticket, expiry, separation of duties
 
-# A role is a bundle of rights per system. Leave a system out if the role has no access there.
-roles:
+roles:                            # a role = what it means in Vault / Kubernetes / GitLab
   viewer:    { description: read-only,          vault: [read, list], kubernetes: view, gitlab: reporter }
   developer: { description: daily development,  vault: [read, list], kubernetes: edit, gitlab: developer }
   deployer:  { description: ships releases,     vault: [read, list, create, update], kubernetes: edit, gitlab: maintainer }
-  approver:  { description: approves releases,  gitlab: maintainer }   # never give deployer + approver to one person
-
-# `id` must equal the login used in Kubernetes (OIDC username) and the Vault entity name.
-people:
-  alice: { team: myteam, status: active }
-  bob:   { team: myteam, status: active }
-
-groups:
-  myteam-devs: [alice, bob]
-
-grants:
-  # whole group, non-production: no ticket needed
-  - { subject: "group:myteam-devs", role: developer, team: myteam, env: dev }
-  - { subject: "group:myteam-devs", role: developer, team: myteam, env: stage }
-  # production always needs a ticket
-  - { subject: "group:myteam-devs", role: viewer, team: myteam, env: prod, ticket: SEC-1 }
-  # one person in production: ticket AND expiry (max 90 days ahead; init uses today + 30)
-  - { subject: alice, role: deployer, team: myteam, env: prod, ticket: SEC-2, expires: @EXPIRES@ }
+  approver:  { description: approves releases,  gitlab: maintainer }
 """
+
+_TEAM_BODY = """\
+teams:
+  myteam:
+    members: [alice, bob]          # everyone in the team (the id = their login in Kubernetes/Vault/GitLab)
+    access:                        # what EVERY member gets, per environment
+      dev: developer
+      stage: developer
+      prod: { role: viewer, ticket: SEC-1 }      # production always needs a ticket
+    extra:                         # one-off or temporary access (production: ticket + expiry, max 90 days)
+      - { who: alice, role: deployer, env: prod, ticket: SEC-2, expires: @EXPIRES@ }
+      - { who: bob,   role: approver, env: prod, ticket: SEC-3, expires: @EXPIRES@ }
+"""
+
+
+def starter_files(single: bool, expires: str) -> dict[str, str]:
+    """name -> content. `single`: everything in one file (the caller ignores the name)."""
+    common_note = "# Shared by all directions: environments and roles. Changed rarely. Owner: security.\n"
+    team_note = (
+        "# One file per direction (web, infr, ...). Rename the team and the people, add more teams below.\n"
+    )
+    files = {
+        "common.yml": f"{_SCHEMA_LINE}{common_note}version: 2\n\n{_COMMON_BODY}",
+        "myteam.yml": f"{_SCHEMA_LINE}{team_note}version: 2\n\n{_TEAM_BODY}",
+        "access.yml": f"{_SCHEMA_LINE}# Everything in one file; split it per direction when it grows.\nversion: 2\n\n"
+        f"{_COMMON_BODY}\n{_TEAM_BODY}",
+    }
+    names = ["access.yml"] if single else ["common.yml", "myteam.yml"]
+    return {n: files[n].replace("@EXPIRES@", expires) for n in names}

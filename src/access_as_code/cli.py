@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 import sys
@@ -14,11 +15,13 @@ from . import __version__
 from .compile import compile_access, effective, write
 from .demo import make_drifted_state
 from .drift import AREAS, diff, unchecked
+from .errors import AccessFileError
 from .export import ExportError, export_state
 from .howto import HOWTO
 from .lint import RULES, lint
-from .model import AccessFileError, load
-from .starter import STARTER
+from .model import load
+from .schemas import SCHEMA_V2
+from .starter import starter_files
 
 
 def _today(a: argparse.Namespace) -> date:
@@ -27,7 +30,10 @@ def _today(a: argparse.Namespace) -> date:
 
 def _cmd_validate(a: argparse.Namespace) -> int:
     acc = load(a.file)
-    print(f"{a.file}: OK ({len(acc.people)} people, {len(acc.roles)} roles, {len(acc.grants)} grants)")
+    print(
+        f"{a.file}: OK ({len(acc.teams)} teams, {len(acc.people)} people, "
+        f"{len(acc.roles)} roles, {len(acc.grants)} grants)"
+    )
     return 0
 
 
@@ -133,16 +139,78 @@ def _cmd_explain(a: argparse.Namespace) -> int:
 
 
 def _cmd_init(a: argparse.Namespace) -> int:
-    path = Path(a.out)
-    text = STARTER.replace("@EXPIRES@", str(_today(a) + timedelta(days=30)))
+    out = Path(a.out)
+    expires = str(_today(a) + timedelta(days=30))
+    files = starter_files(out.suffix in (".yml", ".yaml"), expires)
+    targets = {out if out.suffix in (".yml", ".yaml") else out / name: text for name, text in files.items()}
+    if out.suffix not in (".yml", ".yaml") and out.exists() and not out.is_dir():
+        raise AccessFileError([f"{out} exists and is not a directory"])
+    existing = [str(t) for t in targets if t.exists()]
+    if existing:
+        raise AccessFileError([f"{', '.join(existing)} already exists; refusing to overwrite"])
+    created: list[Path] = []
     try:
-        with open(path, "x", encoding="utf-8") as fh:
-            fh.write(text)
-    except FileExistsError as exc:
-        raise AccessFileError([f"{path} already exists; refusing to overwrite"]) from exc
+        for target, text in targets.items():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(target, "x", encoding="utf-8") as fh:
+                created.append(target)
+                fh.write(text)
     except OSError as exc:
-        raise AccessFileError([f"cannot write {path}: {exc}"]) from exc
-    print(f"wrote {path}. Next: edit it, then `access-as-code lint {path}`")
+        for done in created:
+            done.unlink(missing_ok=True)  # leave nothing half-written behind
+        raise AccessFileError([f"cannot write {out}: {exc}"]) from exc
+    print(f"wrote {', '.join(str(t) for t in targets)}. Next: edit, then `access-as-code lint {out}`")
+    return 0
+
+
+def _cmd_matrix(a: argparse.Namespace) -> int:
+    acc = load(a.file)
+    cells: dict[tuple[str, str], dict[str, int]] = {}
+    for g, _ in effective(acc, _today(a)):
+        roles = cells.setdefault((g.team, g.env), {})
+        roles[g.role] = roles.get(g.role, 0) + 1
+    rows = [["team", *acc.environments]]
+    for team in acc.teams:
+        row = [team]
+        for env in acc.environments:
+            roles = sorted(cells.get((team, env), {}).items())
+            row.append(", ".join(f"{r} x{n}" for r, n in roles) or "-")
+        rows.append(row)
+    widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
+    for r in rows:
+        print("  ".join(c.ljust(w) for c, w in zip(r, widths, strict=True)).rstrip())
+    return 0
+
+
+def _cmd_who(a: argparse.Namespace) -> int:
+    acc = load(a.file)
+    today = _today(a)
+    if a.person not in acc.people:
+        close = difflib.get_close_matches(a.person, acc.people, n=3)
+        hint = f"; did you mean {', '.join(close)}?" if close else ""
+        raise AccessFileError([f"unknown person '{a.person}'{hint}"])
+    person = acc.people[a.person]
+    print(f"{a.person}: team {person.team}, {'active' if person.active else 'OFFBOARDED'}")
+    in_force = {g.index for g, pid in effective(acc, today) if pid == a.person}
+    rows = [g for g in acc.grants if g.index in in_force]
+    for g in sorted(rows, key=lambda g: (g.team, g.env, g.role)):
+        via = g.subject if g.is_group else "direct"
+        print(
+            f"  {g.team}/{g.env}  {g.role}  via {via}  ticket={g.ticket or '-'}  expires={g.expires or '-'}"
+        )
+    if not rows:
+        print("  no effective access")
+    for g in acc.grants:
+        if g.index not in in_force and a.person in acc.members(g):
+            why = f"expired on {g.expires}" if g.expires and g.expires < today else "not in force"
+            if not person.active:
+                why = "person is offboarded"
+            print(f"  NOT IN FORCE ({why}): {g.team}/{g.env}  {g.role}")
+    return 0
+
+
+def _cmd_schema(_: argparse.Namespace) -> int:
+    print(json.dumps(SCHEMA_V2, indent=2))
     return 0
 
 
@@ -161,7 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
     def add(name: str, fn, help_: str, *, file: bool = True, today: bool = True) -> argparse.ArgumentParser:
         s = sub.add_parser(name, help=help_)
         if file:
-            s.add_argument("file", help="access.yml")
+            s.add_argument("file", help="access.yml, or a directory with one .yml file per direction")
         if today:
             s.add_argument("--today", help="YYYY-MM-DD (reproducible runs)")
         s.set_defaults(func=fn)
@@ -179,8 +247,21 @@ def build_parser() -> argparse.ArgumentParser:
     add("rules", _cmd_rules, "list lint rules", file=False, today=False)
     explain = add("explain", _cmd_explain, "how to fix a lint rule", file=False, today=False)
     explain.add_argument("rule", help="e.g. AAC003")
-    add("init", _cmd_init, "write a starter access.yml", file=False).add_argument(
-        "--out", default="access.yml"
+    init = add(
+        "init",
+        _cmd_init,
+        "write a starter declaration (directory; one file if --out ends in .yml)",
+        file=False,
+    )
+    init.add_argument("--out", default="access")
+    add("matrix", _cmd_matrix, "who has how many of which roles per team and environment")
+    add("who", _cmd_who, "effective access of one person").add_argument("person")
+    add(
+        "schema",
+        _cmd_schema,
+        "print the JSON Schema of version 2 files (editor validation)",
+        file=False,
+        today=False,
     )
     ex = add(
         "export-state", _cmd_export_state, "read-only export of actual state from live systems", today=False

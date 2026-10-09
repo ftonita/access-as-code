@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../schema/access.v2.schema.json
+# Direction "infr": teams devops and sys-adm. Owners: infrastructure leads + security.
+version: 2
+
+teams:
+  devops:
+    members: [erin, frank]
+    access:
+      dev: developer
+      stage: developer
+      prod: { role: viewer, ticket: SEC-103 }
+    extra:
+      - { who: frank, role: deployer,    env: prod, ticket: SEC-114, expires: 2026-12-01 }
+      - { who: erin,  role: approver,    env: prod, ticket: SEC-115, expires: 2026-12-01 }
+      - { who: erin,  role: break-glass, env: prod, ticket: SEC-120, expires: 2026-10-12, reason: "incident INC-77" }
+
+  sys-adm:
+    members: [grace, heidi]
+    access:
+      dev: developer
+      stage: developer
+      prod: { role: viewer, ticket: SEC-104 }
+    extra:
+      - { who: grace, role: deployer, env: prod, ticket: SEC-116, expires: 2026-12-01 }
+      - { who: heidi, role: approver, env: prod, ticket: SEC-117, expires: 2026-12-01 }

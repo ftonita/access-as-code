@@ -6,15 +6,9 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-import yaml
-
+from .errors import AccessFileError
+from .layout import load_doc
 from .schemas import schema_errors
-
-
-class AccessFileError(ValueError):
-    def __init__(self, problems: list[str]) -> None:
-        super().__init__("; ".join(problems))
-        self.problems = problems
 
 
 @dataclass(frozen=True)
@@ -46,6 +40,7 @@ class Grant:
     expires: date | None = None
     ticket: str | None = None
     reason: str | None = None
+    source: str | None = None  # file the grant was written in (set for version 2 files)
 
     @property
     def is_group(self) -> bool:
@@ -56,7 +51,8 @@ class Grant:
         return self.subject.removeprefix("group:")
 
     def describe(self) -> str:
-        return f"grant #{self.index} ({self.subject} -> {self.role} on {self.team}/{self.env})"
+        text = f"grant #{self.index} ({self.subject} -> {self.role} on {self.team}/{self.env})"
+        return f"{text} [{self.source}]" if self.source else text
 
 
 @dataclass(frozen=True)
@@ -76,7 +72,7 @@ class Access:
         return (grant.subject_name,) if grant.subject_name in self.people else ()
 
 
-def parse(doc: Any) -> Access:
+def parse(doc: Any, sources: list[str] | None = None) -> Access:
     problems = schema_errors(doc)
     if problems:
         raise AccessFileError(problems)
@@ -95,6 +91,7 @@ def parse(doc: Any) -> Access:
             date.fromisoformat(g["expires"]) if "expires" in g else None,
             g.get("ticket"),
             g.get("reason"),
+            sources[i] if sources else None,
         )
         for i, g in enumerate(doc["grants"])
     )
@@ -109,25 +106,12 @@ def parse(doc: Any) -> Access:
     )
 
 
-class _Loader(yaml.SafeLoader):
-    """SafeLoader that keeps `2026-12-01` a string (validated by the schema) instead of a date object."""
-
-
-_Loader.yaml_implicit_resolvers = {
-    k: [(tag, rx) for tag, rx in v if tag != "tag:yaml.org,2002:timestamp"]
-    for k, v in yaml.SafeLoader.yaml_implicit_resolvers.items()
-}
-
-
 def load(path: str) -> Access:
+    """Load a version 1 file, a version 2 file, or a directory of version 2 files."""
+    doc, sources = load_doc(path)
     try:
-        with open(path, encoding="utf-8") as fh:
-            doc = yaml.load(fh, Loader=_Loader)  # noqa: S506 - restricted SafeLoader subclass
-    except (OSError, yaml.YAMLError) as exc:
-        raise AccessFileError([f"cannot read {path}: {exc}"]) from exc
-    try:
-        return parse(doc)
+        return parse(doc, sources)
+    except AccessFileError:
+        raise
     except ValueError as exc:  # bad date etc.
-        if isinstance(exc, AccessFileError):
-            raise
         raise AccessFileError([str(exc)]) from exc

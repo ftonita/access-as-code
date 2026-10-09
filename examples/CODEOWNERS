@@ -1,3 +1,5 @@
-# Copy to .github/CODEOWNERS or .gitlab/CODEOWNERS. Replace the handles with your own.
-# Nobody can change access without a review from security AND the team leads.
-access.yml  @your-org/security @your-org/team-leads
+# Copy to .github/CODEOWNERS or .gitlab/CODEOWNERS and adapt the paths and handles.
+# One file per direction => each direction is reviewed by its own leads, plus security.
+/access/common.yml  @your-org/security
+/access/web.yml     @your-org/web-leads   @your-org/security
+/access/infr.yml    @your-org/infr-leads  @your-org/security

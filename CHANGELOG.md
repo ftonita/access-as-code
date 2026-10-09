@@ -2,6 +2,21 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/).
 
+## [1.2.0] - 2026-10-09
+
+### Added
+- Version 2 format organised by team (`members`, `access` per environment, `extra` grants, `who` as a list) that
+  support staff can edit; version 1 stays supported with identical output.
+- Declarations can be split across files: any command takes a directory and merges every `*.yml` (e.g. `common.yml`,
+  `web.yml`, `infr.yml`); duplicate definitions are rejected; messages name the file.
+- `matrix` (team x environment overview), `who` (effective access of a person), `schema` (JSON Schema for editor
+  validation, committed as `schema/access.v2.schema.json`).
+- `examples/company/` (two directions, four teams), per-file `examples/CODEOWNERS`, `docs/SUPPORT.md` and
+  `docs/SUPPORT.ru.md` cheat sheets for tech support.
+
+### Changed
+- `init` writes a directory with `common.yml` and a team file (a single file with `--out x.yml`).
+
 ## [1.1.0] - 2026-10-09
 
 ### Added

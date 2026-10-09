@@ -96,7 +96,12 @@ def test_init_writes_lint_clean_starter_and_refuses_overwrite(tmp_path, capsys):
     assert main(["init", "--out", str(out)]) == 0
     assert main(["lint", str(out), "--strict"]) == 0
     assert main(["init", "--out", str(out)]) == 2
-    assert main(["init", "--out", str(tmp_path / "missing" / "a.yml")]) == 2
+    assert main(["init", "--out", str(tmp_path / "dir")]) == 0  # directory layout
+    assert main(["lint", str(tmp_path / "dir"), "--strict"]) == 0
+    assert main(["init", "--out", str(tmp_path / "dir")]) == 2
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    assert main(["init", "--out", str(blocker / "sub")]) == 2  # cannot create
 
 
 def test_explain(capsys):

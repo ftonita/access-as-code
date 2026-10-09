@@ -22,75 +22,107 @@ git clone https://github.com/ftonita/access-as-code.git && cd access-as-code
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
 
-access-as-code init --out access.yml      # стартовый файл, проходящий lint
-access-as-code lint access.yml            # код 0 = OK, 1 = нарушения правил, 2 = некорректный вход
-access-as-code compile access.yml --out build
-ls -R build                               # то, что применится к Vault / Kubernetes / GitLab
+access-as-code init --out access          # стартовые файлы в ./access (common.yml + файл команды)
+access-as-code lint access                # код 0 = OK, 1 = нарушения правил, 2 = некорректный вход
+access-as-code matrix access              # у кого какие роли и где, одним взглядом
+access-as-code compile access --out build # то, что применится к Vault / Kubernetes / GitLab
 ```
 
-Можно обойтись без `init` и поиграть с готовыми файлами: `examples/access.yml` (чистый) и `examples/access.bad.yml` (по одной заложенной проблеме на правило).
-Lint упал? `access-as-code explain AAC003` объяснит, как исправить это правило.
+Или поиграйте с готовым примером - компания, разбитая на два направления: `examples/company/` (чистый, хороший шаблон) и, в прежнем плоском формате, `examples/access.bad.yml` (по одной заложенной проблеме на правило).
+Lint упал? `access-as-code explain AAC003` объяснит, как исправить правило.
 
-**Куда это положить в реальной компании?** В отдельный Git-репозиторий (или каталог) с `access.yml`, CODEOWNERS ([examples/CODEOWNERS](examples/CODEOWNERS)) и CI-задачей ([examples/ci/gitlab-ci.yml](examples/ci/gitlab-ci.yml); для GitHub - `.github/workflows/ci.yml`, задача `access-review`).
+**Кто что правит?** Техподдержка правит YAML по [шпаргалке](docs/SUPPORT.ru.md) (готовые рецепты для типовых заявок). Безопасность владеет `common.yml`. Руководитель направления ревьюит свой файл. Остальное делает CI.
+
+## Модель: один экран на команду
+
+```yaml
+# web.yml - направление "web"
+version: 2
+teams:
+  sites:
+    members: [alice, bob]                    # все люди команды
+    access:                                  # что получает КАЖДЫЙ участник, по окружениям
+      dev: developer
+      stage: developer
+      prod: { role: viewer, ticket: SEC-101 }
+    extra:                                   # разовый / временный доступ
+      - { who: alice, role: deployer, env: prod, ticket: SEC-110, expires: 2026-12-15 }
+      - { who: [bob, carol], role: viewer, env: stage }
+```
+
+| Понятие | Смысл |
+|---|---|
+| **role** | именованный набор прав для каждой системы (задаётся один раз в `common.yml`): «developer» означает одно и то же в Vault, Kubernetes и GitLab |
+| **members** | люди команды. Удалили имя - командный доступ отозван; перенесите имя в `left:`, чтобы lint нашёл забытые строки в `extra` |
+| **access** | матрица команды: окружение -> роль (или `{ role, ticket }`). Действует на каждого участника |
+| **extra** | индивидуальные выдачи: `who` (имя или список), `role`, `env`, необязательные `ticket`, `expires`, `reason`. Строку пишет команда, которой принадлежит ресурс, даже если человек из другой команды |
+
+Практические правила: в production всегда нужен `ticket`; выдача человеку в production требует `expires` (максимум 90 дней); опасная роль `break-glass` требует оба поля и срок не более 7 дней.
+
+## Разбиение на файлы по направлениям
+
+Передайте **каталог** - все `*.yml` в нём объединяются, так что у каждого направления свой файл и свои ревьюеры:
+
+```text
+access/
+  common.yml   # environments, production_environments, roles                  владелец: безопасность
+  web.yml      # teams: sites, portal                                          владелец: руководители web
+  infr.yml     # teams: devops, sys-adm                                        владелец: руководители инфры
+```
+
+* Команды принимают файл или каталог: `access-as-code lint access/`.
+* Команда, человек, группа или роль определяются **ровно один раз**, в одном файле; повторное определение - ошибка с именами обоих файлов. Окружения и `production_environments` объединяются.
+* Порядок файлов не важен. В сообщениях есть имя файла: `AAC003 error: grant #4 (...) [web.yml]: production grant without a ticket`.
+* Доступ «через направления» пишется в файле владельца ресурса: если alice (web) нужен stage в devops, запись идёт в `devops.extra` файла `infr.yml`. Её согласуют руководители инфры (см. [examples/CODEOWNERS](examples/CODEOWNERS)); без тикета lint предупредит о межкомандном доступе (AAC008).
+* Файлы в каталоге должны быть `version: 2`. Небольшой компании можно держать всё в одном файле (`common` + команды).
+* Помощь редактора: каждый пример начинается с `# yaml-language-server: $schema=...`; схема лежит в [schema/access.v2.schema.json](schema/access.v2.schema.json) (`access-as-code schema` её перегенерирует), поэтому VS Code / JetBrains с YAML-плагином подсказывают и подчёркивают ошибки прямо при вводе.
 
 ## Команды
 
+`PATH` - файл или каталог.
+
 | Команда | Что делает | Код возврата |
 |---|---|---|
-| `init [--out access.yml]` | создаёт стартовый файл (не перезаписывает существующий) | 0 / 2 |
-| `validate FILE` | только схема и структура | 0 / 2 |
-| `lint FILE [--strict] [--format json]` | правила минимальных привилегий; `--strict` падает и на предупреждениях | 0 / 1 |
+| `init [--out access]` | стартовые файлы (каталог; один файл, если `--out` оканчивается на `.yml`); ничего не перезаписывает | 0 / 2 |
+| `validate PATH` | только схема и структура | 0 / 2 |
+| `lint PATH [--strict] [--format json]` | правила минимальных привилегий; `--strict` падает и на предупреждениях | 0 / 1 |
 | `explain AAC003` | что значит правило и как его исправить | 0 / 2 |
-| `compile FILE [--out build]` | пишет артефакты Vault / Kubernetes / GitLab | 0 |
-| `export-state FILE --vault --kubernetes --gitlab [--out snapshot.json]` | экспорт фактического состояния из живых систем (только чтение) | 0 / 2 |
-| `diff FILE --actual snapshot.json` | желаемое состояние против фактического (секции, которых нет в снимке, помечаются как непроверенные) | 0 нет дрейфа / 1 дрейф |
-| `review FILE [--days 30]` | истекающие и повышенные выдачи | 0 |
+| `matrix PATH` | таблица команда x окружение: какие роли и сколько людей | 0 |
+| `who PATH PERSON` | весь действующий доступ человека, откуда он взялся, тикеты и сроки | 0 / 2 |
+| `compile PATH [--out build]` | пишет артефакты Vault / Kubernetes / GitLab | 0 |
+| `export-state PATH --vault --kubernetes --gitlab [--out snapshot.json]` | экспорт фактического состояния из живых систем (только чтение) | 0 / 2 |
+| `diff PATH --actual snapshot.json` | желаемое состояние против фактического (секции, которых нет в снимке, помечаются как непроверенные) | 0 нет дрейфа / 1 дрейф |
+| `review PATH [--days 30]` | истекающие и повышенные выдачи | 0 |
+| `schema` | JSON Schema файлов версии 2 (проверка в редакторе) | 0 |
 | `rules` | список правил | 0 |
-| `demo-state FILE [--out actual.json]` | генерирует «дрейфующий» снимок для экспериментов | 0 |
+| `demo-state PATH [--out actual.json]` | генерирует «дрейфующий» снимок для экспериментов | 0 |
 
-Все команды, зависящие от времени, принимают `--today YYYY-MM-DD` (по умолчанию - текущая дата). Код 2 означает, что вход не прочитан или не прошёл схему; сообщение называет точный путь, например `grants[3].ticket: 'x' does not match ...`.
+Все команды, зависящие от времени, принимают `--today YYYY-MM-DD` (по умолчанию - текущая дата). Код 2 означает, что вход не прочитан или не прошёл схему; сообщение называет файл и точный путь, например `web.yml: teams.sites.extra[1]: 'env' is a required property`.
 
-> **Даты в примерах.** Выдачи в примерах истекают в октябре-декабре 2026. Запускайте их с `--today 2026-10-08` (как делают README и CI), иначе позже они начнут падать как «просроченные».
+> **Даты в примерах.** Выдачи в примерах истекают в октябре-декабре 2026. Запускайте их с `--today 2026-10-08` (как делают этот README и CI), иначе позже они начнут падать как «просроченные».
 
 ## Повседневные сценарии
 
-Всё это - правки `access.yml` в merge request:
+Полные версии для копирования с сообщениями CI - в [docs/SUPPORT.ru.md](docs/SUPPORT.ru.md). Коротко: любая заявка - небольшая правка блока одной команды:
 
-| Мне нужно... | Что сделать |
+| В заявке сказано... | Правка |
 |---|---|
-| Принять человека | добавить в `people:` (`team`, `status: active`) и включить в группу, например `payments-devs` |
-| Уволить человека | поставить `status: offboarded`, затем удалить его выдачи и членство в группах (пока не сделано, AAC005 падает) |
-| Дать доступ в prod под задачу | одна выдача: `{ subject: alice, role: deployer, team: payments, env: prod, ticket: SEC-123, expires: <дата, не позже 90 дней> }` |
-| Аварийный доступ | роль с `delete`/Kubernetes `admin` (например `break-glass`), `ticket` и `expires` в пределах 7 дней (AAC004) |
-| Продлить доступ | изменить `expires` и `ticket`; просроченные строки не оставлять (AAC006) |
-| Добавить команду | добавить в `teams:`, затем людей, группы и выдачи. Для Vault нужен KV v2 mount `kv-<team>`, для Kubernetes - namespace `<team>-<env>` |
-| Добавить роль | добавить в `roles:`; систему, где роль ничего не даёт, просто не указывайте |
+| Новый сотрудник | добавить имя в `members` команды |
+| Сотрудник уволился | перенести имя из `members` в `left`; удалить его строки в `extra` |
+| Временный доступ в prod | строка в `extra` с `ticket` и `expires` |
+| Аварийный доступ | то же с ролью `break-glass`, `expires` в пределах 7 дней, `reason` |
+| Продлить / убрать доступ | изменить `expires` / удалить строку |
+| Новая команда | блок в `teams:` (в файле её направления; должны существовать mount Vault `kv-<team>` и namespace'ы Kubernetes `<team>-<env>`) |
+| Новая роль | добавляет безопасность в `common.yml` |
 
 ## Соглашения, на которые опирается инструмент
 
 * **Имена** (`teams`, `environments`, роли, люди, группы) - строчные буквы, цифры и дефисы.
+* **Базовый доступ команды = группа `<team>-team`.** Версия 2 превращает `members` + `access` в группу с таким именем (в сообщениях lint видна как `group:sites-team`); не задавайте группу с таким именем сами.
 * **id человека = логин в целевых системах.** Он становится именем `User` в RoleBinding Kubernetes (ваш OIDC username), участником групп Vault identity и ключом в GitLab `members.json`. Если в вашем IdP логин `a.smith`, переименуйте или сделайте маппинг на шаге применения.
 * **Именование целей:** политика/группа Vault `<team>-<env>-<role>`, путь KV `kv-<team>/data|metadata/<env>/*`, namespace Kubernetes `<team>-<env>`, RoleBinding `aac-<level>` на встроенную ClusterRole `view`/`edit`/`admin`.
 * **AAC007 сопоставляет имена ролей** `deployer` и `approver`. Если роли названы иначе, правило не сработает (см. `SOD_ROLES` в `src/access_as_code/lint.py`).
 * Выдача группе даёт роль каждому участнику; две выдачи одному человеку в одном месте объединяются (побеждает высший уровень GitLab/Kubernetes, в Vault - одна политика на роль).
-
-## Модель
-
-```yaml
-roles:
-  developer: { vault: [read, list], kubernetes: edit, gitlab: developer }
-  deployer:  { vault: [read, list, create, update], kubernetes: edit, gitlab: maintainer }
-  approver:  { gitlab: maintainer }
-people:
-  alice: { team: payments, status: active }
-groups:
-  payments-devs: [alice, bob]
-grants:
-  - { subject: "group:payments-devs", role: developer, team: payments, env: dev }
-  - { subject: alice, role: deployer, team: payments, env: prod, ticket: SEC-110, expires: 2026-12-15 }
-```
-
-Одна выдача = *субъект* + *роль* + *команда* + *окружение* (+ тикет, срок, причина). Роль - набор прав для каждой системы, поэтому «developer» означает одно и то же в Vault, Kubernetes и GitLab.
 
 ## Правила lint (`access-as-code rules`)
 
@@ -121,40 +153,55 @@ AAC007 error: 'alice' is both deployer and approver on payments/prod
 ...
 11 error(s), 5 warning(s), 3 info                                   (exit 1)
 
-$ access-as-code lint examples/access.yml --today 2026-10-08
-AAC011 warning: grant #10 (bob -> break-glass on payments/prod): expires on 2026-10-12
-0 error(s), 1 warning(s), 1 info                                    (exit 0)
+$ access-as-code lint examples/company --today 2026-10-08
+AAC011 warning: grant #5 (erin -> break-glass on devops/prod) [infr.yml]: expires on 2026-10-12
+0 error(s), 1 warning(s), 0 info                                    (exit 0)
 
-$ access-as-code compile examples/access.yml --today 2026-10-08 --out build
-wrote 20 files to build
+$ access-as-code matrix examples/company --today 2026-10-08
+team     dev           stage                    prod
+devops   developer x2  developer x2             approver x1, break-glass x1, deployer x1, viewer x2
+sys-adm  developer x2  developer x2             approver x1, deployer x1, viewer x2
+sites    developer x2  developer x2, viewer x1  approver x1, deployer x1, viewer x2
+portal   developer x2  developer x2             approver x1, deployer x1, viewer x2
+
+$ access-as-code who examples/company carol --today 2026-10-08
+carol: team portal, active
+  portal/dev  developer  via group:portal-team  ticket=-  expires=-
+  portal/prod  deployer  via direct  ticket=SEC-112  expires=2026-12-01
+  portal/prod  viewer  via group:portal-team  ticket=SEC-102  expires=-
+  portal/stage  developer  via group:portal-team  ticket=-  expires=-
+  sites/stage  viewer  via direct  ticket=SEC-130  expires=-
+
+$ access-as-code compile examples/company --today 2026-10-08 --out build
+wrote 38 files to build
 ```
 
-Сгенерировано, например, `build/vault/policies/payments-prod-deployer.hcl`:
+Сгенерировано, например, `build/vault/policies/sites-prod-deployer.hcl`:
 
 ```hcl
-path "kv-payments/data/prod/*" {
+path "kv-sites/data/prod/*" {
   capabilities = ["create", "read", "update"]
 }
 
-path "kv-payments/metadata/prod/*" {
+path "kv-sites/metadata/prod/*" {
   capabilities = ["list", "read"]
 }
 ```
 
-а также `vault/groups.json` (identity-группа -> политика + участники), по одному Kubernetes `RoleBinding` на namespace и уровень (`payments-dev` / `edit`) и `gitlab/members.json` (наивысший уровень на человека в команде).
+а также `vault/groups.json` (identity-группа -> политика + участники), по одному Kubernetes `RoleBinding` на namespace и уровень (`sites-dev` / `edit`) и `gitlab/members.json` (наивысший уровень на человека в команде).
 
 **`compile` выдаёт только действующий доступ**: просроченные выдачи, уволенные и некорректные выдачи не попадают в результат, даже если lint пропустили.
 
 ### Дрейф (drift)
 
 ```text
-$ access-as-code diff examples/access.yml --today 2026-10-08 --actual actual.json
+$ access-as-code diff examples/company --today 2026-10-08 --actual actual.json
+changed  vault_policies:devops-dev-developer  content differs
 extra    vault_policies:legacy-admin  configured but not declared
-changed  vault_policies:payments-dev-developer  content differs
-changed  vault_groups:payments-dev-developer  missing members ['alice']
-changed  vault_groups:payments-prod-break-glass  extra members ['zed']
-missing  kubernetes:payments-dev/edit  declared but not configured
-changed  gitlab:scoring  erin: declared 'developer', actual 'maintainer'
+changed  vault_groups:devops-dev-developer  missing members ['erin']
+changed  vault_groups:devops-prod-break-glass  extra members ['zed']
+missing  kubernetes:devops-dev/edit  declared but not configured
+changed  gitlab:sites  carol: declared 'reporter', actual 'maintainer'
 6 difference(s)                                                      (exit 1)
 ```
 
@@ -163,8 +210,8 @@ changed  gitlab:scoring  erin: declared 'developer', actual 'maintainer'
 ```bash
 export VAULT_ADDR=https://vault.example.com VAULT_TOKEN=...      # нужны list/read на sys/policies/acl и identity/*
 export GITLAB_URL=https://gitlab.example.com GITLAB_TOKEN=...     # scope read_api, членство в группах команд
-access-as-code export-state access.yml --vault --kubernetes --gitlab --out snapshot.json
-access-as-code diff access.yml --actual snapshot.json
+access-as-code export-state access --vault --kubernetes --gitlab --out snapshot.json
+access-as-code diff access --actual snapshot.json
 ```
 
 * **Только чтение**: GET/LIST-запросы и `kubectl get`. Токены берутся из окружения и не попадают в снимок. Используйте отдельный токен только на чтение.
@@ -177,14 +224,14 @@ access-as-code diff access.yml --actual snapshot.json
 
 Покрыто тестами на поддельных Vault/GitLab и поддельном `kubectl`, **но не на реальных инсталляциях**.
 
-Чтобы воспроизвести пример без живых систем: `access-as-code demo-state examples/access.yml --today 2026-10-08 --out actual.json` генерирует правдоподобные ручные правки. В реальной работе вы по расписанию выгружаете те же четыре секции из своих систем и роняете задачу при любом различии. Проще всего изучить формат так: `compile` пишет «желаемую» сторону, а `demo-state` - полный пример снимка. Форма снимка:
+Чтобы воспроизвести пример без живых систем: `access-as-code demo-state examples/company --today 2026-10-08 --out actual.json` генерирует правдоподобные ручные правки. В реальной работе вы по расписанию выгружаете те же четыре секции из своих систем и роняете задачу при любом различии. Проще всего изучить формат так: `compile` пишет «желаемую» сторону, а `demo-state` - полный пример снимка. Форма снимка:
 
 ```json
 {
-  "vault_policies": { "payments-dev-developer": "<текст HCL, как в build/vault/policies/*.hcl>" },
-  "vault_groups":   { "payments-dev-developer": ["alice", "bob"] },
-  "kubernetes":     { "payments-dev/edit": ["alice", "bob"] },
-  "gitlab":         { "payments": { "alice": "maintainer" } }
+  "vault_policies": { "sites-dev-developer": "<текст HCL, как в build/vault/policies/*.hcl>" },
+  "vault_groups":   { "sites-dev-developer": ["alice", "bob"] },
+  "kubernetes":     { "sites-dev/edit": ["alice", "bob"] },
+  "gitlab":         { "sites": { "alice": "maintainer" } }
 }
 ```
 
@@ -192,10 +239,14 @@ access-as-code diff access.yml --actual snapshot.json
 
 ## Рекомендуемый процесс
 
-1. `access.yml` лежит в репозитории с CODEOWNERS (безопасность + тимлиды).
+1. Каталог `access/` лежит в репозитории с CODEOWNERS: свой владелец на каждый файл (безопасность - `common.yml`, руководители направления - свой файл).
 2. Merge request: CI запускает `lint` (блокирующий) и показывает `review`.
 3. После слияния: `compile`, применение вашими средствами (провайдер Terraform для Vault, `kubectl apply`, GitLab API).
 4. Ночью: `export-state`, затем `diff`; алерт при дрейфе.
+
+## Плоский формат (версия 1)
+
+Прежний однофайловый формат (`version: 1`: `people`, `groups` и список `grants` с полями `subject`, `role`, `team`, `env`) по-прежнему поддерживается и даёт точно такой же результат; см. `examples/access.yml` и `examples/access.bad.yml`. Для нового лучше использовать версию 2: она короче и делится по направлениям. Внутри оба формата превращаются в одну модель.
 
 ## FAQ
 
@@ -206,6 +257,6 @@ access-as-code diff access.yml --actual snapshot.json
 
 ## Что проверено
 
-Воспроизведение: `pip install -e ".[dev]" && pytest` (62 теста): каждое правило lint (позитивные, негативные и граничные случаи, например срок ровно через 90 дней или истекающий сегодня), отклонение схемой, разворачивание групп, детерминированная компиляция, исключение просроченного/уволенного доступа, все виды дрейфа, коды возврата CLI.
+Воспроизведение: `pip install -e ".[dev]" && pytest` (81 тест): каждое правило lint (позитивные, негативные и граничные случаи, например срок ровно через 90 дней или истекающий сегодня), отклонение схемой, разворачивание групп, детерминированная компиляция, исключение просроченного/уволенного доступа, все виды дрейфа, коды возврата CLI.
 
-**Не проверено:** применение результата к реальным Vault, Kubernetes или GitLab; форматы HCL, RoleBinding и уровней участников следуют публичной документации, но в эти системы не загружались. `export-state` проверен только на поддельных сервисах; namespace'ы Vault, отличные от токена, вложенные подгруппы GitLab и унаследованное членство не выгружаются. Пути политик Vault предполагают KV v2 mount с именами `kv-<team>`. Роли действуют на уровне команды и окружения; более тонкое ограничение (отдельные пути, время суток) вне рамок проекта.
+**Не проверено:** применение результата к реальным Vault, Kubernetes или GitLab; форматы HCL, RoleBinding и уровней участников следуют публичной документации, но в эти системы не загружались. `export-state` проверен только на поддельных сервисах; namespace'ы Vault, отличные от токена, вложенные подгруппы GitLab и унаследованное членство не выгружаются. Пути политик Vault предполагают KV v2 mount с именами `kv-<team>`. Слияние нескольких файлов и разворачивание версии 2 покрыты тестами (повторные определения, порядок файлов, сообщения с именами файлов). Роли действуют на уровне команды и окружения; более тонкое ограничение (отдельные пути, время суток) вне рамок проекта.

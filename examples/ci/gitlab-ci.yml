@@ -1,4 +1,4 @@
-# Copy into the repository that holds access.yml (adjust the path/image if needed).
+# Copy into the repository that holds the access/ directory (adjust the path/image if needed).
 # Merge request: lint blocks on errors. Default branch: compile and keep the result as an artifact.
 stages: [check, build]
 
@@ -11,7 +11,7 @@ lint:
   extends: .aac
   stage: check
   script:
-    - access-as-code lint access.yml          # add --strict to fail on warnings too
+    - access-as-code lint access          # add --strict to fail on warnings too
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
@@ -19,8 +19,8 @@ compile:
   extends: .aac
   stage: build
   script:
-    - access-as-code lint access.yml
-    - access-as-code compile access.yml --out build
+    - access-as-code lint access
+    - access-as-code compile access --out build
   artifacts:
     paths: [build/]
   rules:
@@ -33,7 +33,7 @@ drift:
   script:
     # VAULT_ADDR/VAULT_TOKEN, GITLAB_URL/GITLAB_TOKEN: read-only tokens as masked CI variables.
     # Drop --kubernetes unless the runner has a kubeconfig.
-    - access-as-code export-state access.yml --vault --gitlab --out snapshot.json
-    - access-as-code diff access.yml --actual snapshot.json
+    - access-as-code export-state access --vault --gitlab --out snapshot.json
+    - access-as-code diff access --actual snapshot.json
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"

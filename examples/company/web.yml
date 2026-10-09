@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../schema/access.v2.schema.json
+# Direction "web": teams sites and portal. Owners: web leads + security.
+version: 2
+
+teams:
+  sites:
+    members: [alice, bob]            # everyone in the team. Person leaves -> move the name to `left`
+    access:                          # what EVERY member gets, per environment
+      dev: developer
+      stage: developer
+      prod: { role: viewer, ticket: SEC-101 }   # production always needs a ticket
+    extra:                           # one-off or temporary access (prod: ticket + expiry)
+      - { who: alice, role: deployer, env: prod, ticket: SEC-110, expires: 2026-12-15 }
+      - { who: bob,   role: approver, env: prod, ticket: SEC-111, expires: 2026-12-15 }
+      - { who: carol, role: viewer,   env: stage, ticket: SEC-130 }   # carol is from team portal
+
+  portal:
+    members: [carol, dave]
+    left: [ivan]                     # left the company: keep here until nothing refers to him
+    access:
+      dev: developer
+      stage: developer
+      prod: { role: viewer, ticket: SEC-102 }
+    extra:
+      - { who: carol, role: deployer, env: prod, ticket: SEC-112, expires: 2026-12-01 }
+      - { who: dave,  role: approver, env: prod, ticket: SEC-113, expires: 2026-12-01 }
