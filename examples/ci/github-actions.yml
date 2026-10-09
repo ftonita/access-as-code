@@ -1,0 +1,18 @@
+# Copy to .github/workflows/access.yml in the repository that holds the access/ directory.
+# Every pull request that changes the catalog gets: validation, lint findings as annotations on the file, a team x environment matrix, and the exact change in generated Vault / Kubernetes / GitLab config.
+name: access
+
+on:
+  pull_request:
+    paths: [access/**]
+
+permissions:
+  contents: read
+
+jobs:
+  access:
+    uses: ftonita/access-as-code/.github/workflows/access-check.yml@main   # pin a tag or SHA for stricter supply-chain control
+    with:
+      path: access
+      # tool: git+https://github.com/ftonita/access-as-code.git@v1.2.0   # pin the tool version too
+      strict: false          # true: warnings (e.g. a grant about to expire) block the merge as well

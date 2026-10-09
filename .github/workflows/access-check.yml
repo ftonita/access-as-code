@@ -1,0 +1,117 @@
+# Reusable workflow: checks an access catalog (a file or a directory) in a pull request.
+#
+#   jobs:
+#     access:
+#       uses: ftonita/access-as-code/.github/workflows/access-check.yml@main
+#       with: { path: access }
+#
+# What it does: validates and lints (findings appear as annotations on the changed lines), then prints the
+# team x environment matrix and the exact change in generated Vault/Kubernetes/GitLab configuration relative
+# to the base branch into the job summary, so reviewers see what the merge would really change.
+# Read-only: it never touches Vault, Kubernetes or GitLab.
+name: access-check
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: Catalog file or directory, relative to the repository root
+        type: string
+        default: access
+      today:
+        description: Pin the date (YYYY-MM-DD) for reproducible runs. Leave empty to use the real date.
+        type: string
+        default: ""
+      strict:
+        description: Fail on warnings too (e.g. grants about to expire)
+        type: boolean
+        default: false
+      tool:
+        description: pip requirement for access-as-code. Pin a tag, e.g. git+https://github.com/ftonita/access-as-code.git@v1.2.0 ("." when this repository is the tool itself)
+        type: string
+        default: git+https://github.com/ftonita/access-as-code.git
+      python-version:
+        type: string
+        default: "3.13"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      ACCESS_PATH: ${{ inputs.path }}
+      ACCESS_TODAY: ${{ inputs.today }}
+      ACCESS_STRICT: ${{ inputs.strict }}
+      ACCESS_TOOL: ${{ inputs.tool }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out the base branch (to show what changes)
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: _base
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: Install access-as-code
+        run: pip install --quiet "$ACCESS_TOOL"
+
+      - name: Validate
+        run: access-as-code validate "$ACCESS_PATH"
+
+      - name: Lint (least-privilege rules)
+        run: |
+          args=(--format github)
+          [ -n "$ACCESS_TODAY" ] && args+=(--today "$ACCESS_TODAY")
+          [ "$ACCESS_STRICT" = "true" ] && args+=(--strict)
+          access-as-code lint "$ACCESS_PATH" "${args[@]}"
+
+      - name: Summary and change preview
+        if: always()
+        run: |
+          today=()
+          [ -n "$ACCESS_TODAY" ] && today=(--today "$ACCESS_TODAY")
+          {
+            echo "## Access catalog: \`$ACCESS_PATH\`"
+            echo
+            echo '### Roles per team and environment'
+            echo '```text'
+            access-as-code matrix "$ACCESS_PATH" "${today[@]}" || true
+            echo '```'
+            echo
+            echo '### Expiring and elevated grants'
+            echo '```text'
+            access-as-code review "$ACCESS_PATH" "${today[@]}" || true
+            echo '```'
+            echo
+            echo '### Change in generated configuration (base -> this PR)'
+            if [ -e "_base/$ACCESS_PATH" ]; then
+              if ! access-as-code compile "_base/$ACCESS_PATH" "${today[@]}" --out /tmp/out-base > /tmp/base.log 2>&1; then
+                echo "The base branch does not compile, so no change preview is possible:"
+                echo '```text'; cat /tmp/base.log; echo '```'
+              elif ! access-as-code compile "$ACCESS_PATH" "${today[@]}" --out /tmp/out-head > /tmp/head.log 2>&1; then
+                echo "This PR does not compile:"
+                echo '```text'; cat /tmp/head.log; echo '```'
+              elif diff -ru /tmp/out-base /tmp/out-head > /tmp/changes.diff; then
+                echo 'No change to Vault policies, Kubernetes bindings or GitLab members.'
+              else
+                echo '```diff'
+                head -n 400 /tmp/changes.diff
+                echo '```'
+              fi
+            else
+              echo "Not available (no \`$ACCESS_PATH\` on the base branch or not a pull request)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compile (the catalog must produce configuration)
+        run: |
+          today=()
+          [ -n "$ACCESS_TODAY" ] && today=(--today "$ACCESS_TODAY")
+          access-as-code compile "$ACCESS_PATH" "${today[@]}" --out "$RUNNER_TEMP/build"

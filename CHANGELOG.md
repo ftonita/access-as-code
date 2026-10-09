@@ -15,6 +15,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   `docs/SUPPORT.ru.md` cheat sheets for tech support.
 
 ### Changed
+- `lint --format github` (annotations attached to the file); reusable GitHub Actions workflow `access-check.yml` for
+  pull requests (validate, lint, matrix, change preview, compile) and a copy-paste caller
+  `examples/ci/github-actions.yml`.
 - `init` writes a directory with `common.yml` and a team file (a single file with `--out x.yml`).
 
 ## [1.1.0] - 2026-10-09

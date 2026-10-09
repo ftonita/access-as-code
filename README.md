@@ -85,7 +85,7 @@ access/
 |---|---|---|
 | `init [--out access]` | starter files (a directory; a single file if `--out` ends in `.yml`); never overwrites | 0 / 2 |
 | `validate PATH` | schema and structure only | 0 / 2 |
-| `lint PATH [--strict] [--format json]` | least-privilege rules; `--strict` fails on warnings too | 0 / 1 |
+| `lint PATH [--strict] [--format text, json or github]` | least-privilege rules; `--strict` fails on warnings too; `github` prints annotations attached to the offending file in the PR | 0 / 1 |
 | `explain AAC003` | what a rule means and how to fix it | 0 / 2 |
 | `matrix PATH` | table team x environment: which roles, how many people | 0 |
 | `who PATH PERSON` | all effective access of one person, where it comes from, tickets and expiry | 0 / 2 |
@@ -244,6 +244,16 @@ A snapshot with none of the four sections is rejected (exit 2). A section that i
 3. After merge: `compile`, apply with your tooling (Terraform Vault provider, `kubectl apply`, GitLab API).
 4. Nightly: `export-state` then `diff`; page on drift.
 
+## Pull request check (GitHub Actions)
+
+Copy [examples/ci/github-actions.yml](examples/ci/github-actions.yml) to `.github/workflows/access.yml` of your access repository (5 lines of configuration). It calls the reusable workflow [.github/workflows/access-check.yml](.github/workflows/access-check.yml), which on every PR that touches `access/`:
+
+* validates and lints; findings show up as **annotations on the offending file** and block the merge (`strict: true` also blocks on warnings);
+* writes a **job summary** with the team x environment matrix, expiring/elevated grants and a `diff` of the generated Vault / Kubernetes / GitLab configuration between the base branch and the PR, so a reviewer sees what merging would really change;
+* checks that the catalog compiles. It is read-only and needs no secrets (`permissions: contents: read`).
+
+Make the check **required** (branch protection / ruleset) and add CODEOWNERS so each direction's file needs its own leads' approval. This repository dogfoods it in `.github/workflows/access-pr.yml`. Pin the `uses:` ref to a tag or commit SHA if you want to control updates.
+
 ## Flat format (version 1)
 
 The original single-file format (`version: 1`: `people`, `groups` and a list of `grants`, each with `subject`, `role`, `team`, `env`) is still supported and produces exactly the same output; see `examples/access.yml` and `examples/access.bad.yml`. New work should use version 2, which is shorter and can be split by direction. Both are internally turned into the same model.
@@ -257,6 +267,6 @@ The original single-file format (`version: 1`: `people`, `groups` and a list of 
 
 ## What is verified
 
-Reproduce with `pip install -e ".[dev]" && pytest` (81 tests): every lint rule (positive, negative and boundary cases such as an expiry exactly 90 days away or a grant expiring today), schema rejection, group resolution, deterministic compilation, exclusion of expired/offboarded access, drift of every kind, CLI exit codes.
+Reproduce with `pip install -e ".[dev]" && pytest` (82 tests): every lint rule (positive, negative and boundary cases such as an expiry exactly 90 days away or a grant expiring today), schema rejection, group resolution, deterministic compilation, exclusion of expired/offboarded access, drift of every kind, CLI exit codes.
 
 **Not verified:** applying the output to real Vault, Kubernetes or GitLab instances; the HCL, RoleBinding and member-level formats follow the public documentation but were never loaded into those systems. `export-state` was tested against fakes only; objects Vault returns for namespaces other than the token's, nested GitLab subgroups and inherited memberships are not exported. Vault policy paths assume KV v2 mounts named `kv-<team>`. The merge of several files and the version 2 flattening are covered by tests (duplicate definitions, ordering, error messages with file names). Roles are per-team and per-environment; finer scoping (single paths, time-of-day) is out of scope.

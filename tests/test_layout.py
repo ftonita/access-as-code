@@ -238,3 +238,16 @@ def test_single_file_starter_is_a_valid_single_document(tmp_path):
     text = out.read_text()
     assert text.count("version: 2") == 1
     assert main(["lint", str(out), "--strict"]) == 0
+
+
+def test_lint_github_annotations(tmp_path, capsys):
+    bad = WEB.replace("role: viewer, ticket: SEC-1", "role: viewer")
+    path = write(tmp_path, common=COMMON, web=bad)
+    assert main(["lint", str(path), "--format", "github", "--today", TODAY]) == 1
+    out = capsys.readouterr().out
+    assert f"::error file={path}/web.yml,title=AAC003::" in out
+    assert (
+        main(["lint", str(ROOT / "examples" / "access.bad.yml"), "--format", "github", "--today", TODAY]) == 1
+    )
+    out = capsys.readouterr().out
+    assert "::error file=" in out and "::notice file=" in out and "%" not in out.replace("%25", "")

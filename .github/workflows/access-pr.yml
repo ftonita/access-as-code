@@ -1,0 +1,17 @@
+# Dogfooding: every pull request is checked by the reusable workflow.
+# In a real access repository this file is the template in examples/ci/github-actions.yml.
+name: access-pr
+
+on:
+  pull_request:   # no path filter: a path-filtered workflow never reports, which would block PRs if it is required
+
+permissions:
+  contents: read
+
+jobs:
+  access:
+    uses: ./.github/workflows/access-check.yml
+    with:
+      path: examples/company
+      today: "2026-10-08"   # the example has fixed dates; remove this line in a real repository
+      tool: .

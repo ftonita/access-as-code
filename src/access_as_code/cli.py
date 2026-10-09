@@ -37,9 +37,31 @@ def _cmd_validate(a: argparse.Namespace) -> int:
     return 0
 
 
+_GITHUB_LEVEL = {"error": "error", "warning": "warning", "info": "notice"}
+
+
+def _github_annotation(v, acc, path: str) -> str:
+    """GitHub Actions workflow command: shows the finding on the offending file in the PR."""
+    file = path
+    if v.grant is not None and (src := acc.grants[v.grant].source) and Path(path).is_dir():
+        file = f"{path.rstrip('/')}/{src}"
+
+    def esc(text: str, *, prop: bool = False) -> str:
+        text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        return text.replace(":", "%3A").replace(",", "%2C") if prop else text
+
+    return f"::{_GITHUB_LEVEL[v.severity]} file={esc(file, prop=True)},title={v.rule}::{esc(v.message)}"
+
+
 def _cmd_lint(a: argparse.Namespace) -> int:
-    violations = lint(load(a.file), _today(a))
-    if a.format == "json":
+    acc = load(a.file)
+    violations = lint(acc, _today(a))
+    if a.format == "github":
+        for v in violations:
+            print(_github_annotation(v, acc, a.file))
+        errs = sum(v.severity == "error" for v in violations)
+        print(f"{errs} error(s), {len(violations) - errs} warning(s)/info")
+    elif a.format == "json":
         print(json.dumps([v.__dict__ for v in violations], indent=2))
     else:
         for v in violations:
@@ -238,7 +260,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("validate", _cmd_validate, "schema and structure check", today=False)
     lp = add("lint", _cmd_lint, "least-privilege rules")
     lp.add_argument("--strict", action="store_true", help="warnings fail too")
-    lp.add_argument("--format", choices=["text", "json"], default="text")
+    lp.add_argument("--format", choices=["text", "json", "github"], default="text")
     add("compile", _cmd_compile, "emit Vault / Kubernetes / GitLab artifacts").add_argument(
         "--out", default="build"
     )

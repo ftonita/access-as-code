@@ -20,6 +20,7 @@ class Violation:
     rule: str
     severity: str  # error | warning | info
     message: str
+    grant: int | None = None  # index of the grant the finding is about, if any
 
     def __str__(self) -> str:
         return f"{self.rule} {self.severity}: {self.message}"
@@ -43,8 +44,10 @@ RULES = {
 def lint(acc: Access, today: date) -> list[Violation]:
     out: list[Violation] = []
 
+    current: int | None = None  # grant being checked, attached to every finding raised for it
+
     def add(rule: str, sev: str, msg: str) -> None:
-        out.append(Violation(rule, sev, msg))
+        out.append(Violation(rule, sev, msg, current))
 
     for role in acc.roles.values():
         if "sudo" in role.vault:
@@ -64,6 +67,7 @@ def lint(acc: Access, today: date) -> list[Violation]:
     prod_roles: dict[tuple[str, str, str], set[str]] = defaultdict(set)  # (person, team, env) -> roles
 
     for g in acc.grants:
+        current = g.index
         d = g.describe()
         valid = True
         if g.team not in acc.teams:
@@ -126,6 +130,7 @@ def lint(acc: Access, today: date) -> list[Violation]:
             if prod:
                 prod_roles[(pid, g.team, g.env)].add(g.role)
 
+    current = None
     for (pid, team, env), roles in sorted(prod_roles.items()):
         if set(SOD_ROLES) <= roles:
             add("AAC007", "error", f"'{pid}' is both deployer and approver on {team}/{env}")
