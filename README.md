@@ -42,7 +42,8 @@ Lint failed? `access-as-code explain AAC003` tells you how to fix that rule.
 | `lint FILE [--strict] [--format json]` | least-privilege rules; `--strict` fails on warnings too | 0 / 1 |
 | `explain AAC003` | what a rule means and how to fix it | 0 / 2 |
 | `compile FILE [--out build]` | write Vault / Kubernetes / GitLab artifacts | 0 |
-| `diff FILE --actual snapshot.json` | desired vs actual state | 0 no drift / 1 drift |
+| `export-state FILE --vault --kubernetes --gitlab [--out snapshot.json]` | read-only export of the actual state from live systems | 0 / 2 |
+| `diff FILE --actual snapshot.json` | desired vs actual state (areas missing from the snapshot are reported as not checked) | 0 no drift / 1 drift |
 | `review FILE [--days 30]` | expiring and elevated grants | 0 |
 | `rules` | list all rules | 0 |
 | `demo-state FILE [--out actual.json]` | fabricate a drifted snapshot for experiments | 0 |
@@ -157,7 +158,26 @@ changed  gitlab:scoring  erin: declared 'developer', actual 'maintainer'
 6 difference(s)                                                      (exit 1)
 ```
 
-To reproduce: `access-as-code demo-state examples/access.yml --today 2026-10-08 --out actual.json` fabricates plausible hand-made changes. In real use you export the same four sections from your systems on a schedule and fail the job on any difference. Easiest way to learn the format: `compile` writes the "desired" side, and `demo-state` writes a complete example snapshot. Shape of the snapshot:
+### Exporting the actual state from live systems
+
+```bash
+export VAULT_ADDR=https://vault.example.com VAULT_TOKEN=...      # needs list/read on sys/policies/acl and identity/*
+export GITLAB_URL=https://gitlab.example.com GITLAB_TOKEN=...     # read_api scope, member of the team groups
+access-as-code export-state access.yml --vault --kubernetes --gitlab --out snapshot.json
+access-as-code diff access.yml --actual snapshot.json
+```
+
+* **Read-only**: only GET/LIST requests and `kubectl get`. Tokens are read from the environment and never written to the snapshot. Use a dedicated read-only token.
+* **Vault**: all ACL policies except `default`/`root`, and all identity groups with their entity *names* (entity name must equal the person id). `VAULT_CACERT` is honoured.
+* **Kubernetes**: `kubectl` with your current context. By default only RoleBindings labelled `managed-by=access-as-code` (what `compile` generates) are read; add `--k8s-all` to also catch hand-made RoleBindings to `view`/`edit`/`admin`.
+* **GitLab**: *direct* members of the group `<prefix><team>` (`--gitlab-group-prefix 'acme/'`); guest/owner levels are exported as is, so an owner shows up as drift. A team without a group is reported as missing.
+* * Safety: HTTPS is required (plain `http://` only for localhost), redirects are never followed, `VAULT_NAMESPACE` is honoured. A group member whose Vault entity was deleted appears as `<unknown-entity:id>`; Kubernetes Group/ServiceAccount subjects appear as `group:<name>` / `serviceaccount:<ns>:<name>` so over-privilege shows up as extra members; GitLab inherited (parent-group) members are not listed.
+* A missing GitLab group is an error (wrong prefix or token?) unless `--gitlab-missing-ok`.
+* Pass only the systems you can reach: the others are listed as `not checked`, not as drift.
+
+This is covered by tests against a fake Vault/GitLab and a fake `kubectl`, **not against real instances**.
+
+To reproduce the sample output without any live system: `access-as-code demo-state examples/access.yml --today 2026-10-08 --out actual.json` fabricates plausible hand-made changes. In real use you export the same four sections from your systems on a schedule and fail the job on any difference. Easiest way to learn the format: `compile` writes the "desired" side, and `demo-state` writes a complete example snapshot. Shape of the snapshot:
 
 ```json
 {
@@ -168,14 +188,14 @@ To reproduce: `access-as-code demo-state examples/access.yml --today 2026-10-08 
 }
 ```
 
-Missing sections count as empty, so a half-filled snapshot reports "missing" for everything declared.
+A snapshot with none of the four sections is rejected (exit 2). A section that is absent from the snapshot is not checked; an empty one (`{}`) means "nothing configured" and reports everything declared as missing.
 
 ## Suggested workflow
 
 1. `access.yml` lives in a repo with CODEOWNERS (security + team leads).
 2. Merge request: CI runs `lint` (blocking) and shows `review`.
 3. After merge: `compile`, apply with your tooling (Terraform Vault provider, `kubectl apply`, GitLab API).
-4. Nightly: `diff` against an exported snapshot; page on drift.
+4. Nightly: `export-state` then `diff`; page on drift.
 
 ## FAQ
 
@@ -186,6 +206,6 @@ Missing sections count as empty, so a half-filled snapshot reports "missing" for
 
 ## What is verified
 
-Reproduce with `pip install -e ".[dev]" && pytest` (49 tests): every lint rule (positive, negative and boundary cases such as an expiry exactly 90 days away or a grant expiring today), schema rejection, group resolution, deterministic compilation, exclusion of expired/offboarded access, drift of every kind, CLI exit codes.
+Reproduce with `pip install -e ".[dev]" && pytest` (62 tests): every lint rule (positive, negative and boundary cases such as an expiry exactly 90 days away or a grant expiring today), schema rejection, group resolution, deterministic compilation, exclusion of expired/offboarded access, drift of every kind, CLI exit codes.
 
-**Not verified:** applying the output to real Vault, Kubernetes or GitLab instances; the HCL, RoleBinding and member-level formats follow the public documentation but were never loaded into those systems. Exporting the "actual" snapshot from live systems is not implemented (only the comparison is). Vault policy paths assume KV v2 mounts named `kv-<team>`. Roles are per-team and per-environment; finer scoping (single paths, time-of-day) is out of scope.
+**Not verified:** applying the output to real Vault, Kubernetes or GitLab instances; the HCL, RoleBinding and member-level formats follow the public documentation but were never loaded into those systems. `export-state` was tested against fakes only; objects Vault returns for namespaces other than the token's, nested GitLab subgroups and inherited memberships are not exported. Vault policy paths assume KV v2 mounts named `kv-<team>`. Roles are per-team and per-environment; finer scoping (single paths, time-of-day) is out of scope.

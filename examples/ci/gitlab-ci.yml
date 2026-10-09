@@ -31,6 +31,9 @@ drift:
   extends: .aac
   stage: check
   script:
-    - access-as-code diff access.yml --actual snapshot.json   # produce snapshot.json from your systems first
+    # VAULT_ADDR/VAULT_TOKEN, GITLAB_URL/GITLAB_TOKEN: read-only tokens as masked CI variables.
+    # Drop --kubernetes unless the runner has a kubeconfig.
+    - access-as-code export-state access.yml --vault --gitlab --out snapshot.json
+    - access-as-code diff access.yml --actual snapshot.json
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"

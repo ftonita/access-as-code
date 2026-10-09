@@ -1,9 +1,10 @@
-"""access-as-code: init | validate | lint | explain | compile | diff | review | rules | demo-state."""
+"""access-as-code: init | validate | lint | explain | compile | export-state | diff | review | ..."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Sequence
 from datetime import date, timedelta
@@ -12,7 +13,8 @@ from pathlib import Path
 from . import __version__
 from .compile import compile_access, effective, write
 from .demo import make_drifted_state
-from .drift import diff
+from .drift import AREAS, diff, unchecked
+from .export import ExportError, export_state
 from .howto import HOWTO
 from .lint import RULES, lint
 from .model import AccessFileError, load
@@ -58,9 +60,13 @@ def _cmd_diff(a: argparse.Namespace) -> int:
         actual = json.loads(Path(a.actual).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise AccessFileError([f"cannot read {a.actual}: {exc}"]) from exc
+    if not isinstance(actual, dict) or not any(area in actual for area in AREAS):
+        raise AccessFileError([f"{a.actual}: none of the sections {', '.join(AREAS)} found"])
     drift = diff(desired, actual)
     for d in drift:
         print(d)
+    if skipped := unchecked(actual):
+        print(f"not checked (absent from snapshot): {', '.join(skipped)}")
     print(f"{len(drift)} difference(s)" if drift else "no drift")
     return 1 if drift else 0
 
@@ -87,6 +93,34 @@ def _cmd_review(a: argparse.Namespace) -> int:
 def _cmd_rules(_: argparse.Namespace) -> int:
     for rid, text in RULES.items():
         print(f"{rid}  {text}")
+    return 0
+
+
+def _env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise AccessFileError([f"environment variable {name} is not set"])
+    return value
+
+
+def _cmd_export_state(a: argparse.Namespace) -> int:
+    if not (a.vault or a.kubernetes or a.gitlab):
+        raise AccessFileError(["choose at least one of --vault, --kubernetes, --gitlab"])
+    acc = load(a.file)
+    try:
+        state = export_state(
+            list(acc.teams),
+            vault=(_env("VAULT_ADDR"), _env("VAULT_TOKEN")) if a.vault else None,
+            kubernetes=a.kubernetes,
+            k8s_all=a.k8s_all,
+            gitlab=(_env("GITLAB_URL"), _env("GITLAB_TOKEN")) if a.gitlab else None,
+            gitlab_prefix=a.gitlab_group_prefix,
+            gitlab_missing_ok=a.gitlab_missing_ok,
+        )
+    except ExportError as exc:
+        raise AccessFileError([str(exc)]) from exc
+    Path(a.out).write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"wrote snapshot ({', '.join(state)}) to {a.out}")
     return 0
 
 
@@ -147,6 +181,20 @@ def build_parser() -> argparse.ArgumentParser:
     explain.add_argument("rule", help="e.g. AAC003")
     add("init", _cmd_init, "write a starter access.yml", file=False).add_argument(
         "--out", default="access.yml"
+    )
+    ex = add(
+        "export-state", _cmd_export_state, "read-only export of actual state from live systems", today=False
+    )
+    ex.add_argument("--out", default="snapshot.json")
+    ex.add_argument(
+        "--vault", action="store_true", help="policies + identity groups (VAULT_ADDR, VAULT_TOKEN)"
+    )
+    ex.add_argument("--kubernetes", action="store_true", help="RoleBindings via kubectl (current context)")
+    ex.add_argument("--k8s-all", action="store_true", help="also unlabelled RoleBindings to view/edit/admin")
+    ex.add_argument("--gitlab", action="store_true", help="group members (GITLAB_URL, GITLAB_TOKEN)")
+    ex.add_argument("--gitlab-group-prefix", default="", help="e.g. 'acme/' if team groups live under acme")
+    ex.add_argument(
+        "--gitlab-missing-ok", action="store_true", help="a team without a GitLab group is not an error"
     )
     add("demo-state", _cmd_demo_state, "write a synthetic drifted snapshot").add_argument(
         "--out", default="actual.json"

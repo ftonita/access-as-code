@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 ## [1.1.0] - 2026-10-09
 
 ### Added
+- `export-state`: read-only export of the actual state from live Vault, Kubernetes (`kubectl`) and GitLab; `diff`
+  skips and reports areas absent from the snapshot.
 - `init` writes a lint-clean starter `access.yml`; `explain AAC0xx` shows how to fix a rule; lint prints a hint.
 - Russian README (`README.ru.md`) with a language switch in both READMEs; quickstart, recipes, snapshot format,
   FAQ; `examples/ci/gitlab-ci.yml` and `examples/CODEOWNERS`.

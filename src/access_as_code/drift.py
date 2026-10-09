@@ -23,9 +23,16 @@ def _norm(v: Any) -> Any:
     return v.strip() if isinstance(v, str) else v
 
 
+def unchecked(actual: dict[str, Any]) -> list[str]:
+    """Areas absent from the snapshot (e.g. a partial export); `diff` does not compare them."""
+    return [a for a in AREAS if a not in actual]
+
+
 def diff(desired: dict[str, Any], actual: dict[str, Any]) -> list[Drift]:
     out: list[Drift] = []
     for area in AREAS:
+        if area not in actual:
+            continue
         want, have = desired.get(area, {}), actual.get(area, {})
         for key in sorted(set(want) | set(have)):
             if key not in have:
