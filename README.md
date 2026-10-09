@@ -40,7 +40,9 @@ Lint failed? `access-as-code explain AAC003` tells you how to fix that rule.
 version: 2
 teams:
   sites:
-    members: [alice, bob]                    # everyone in the team
+    members:                                 # everyone in the team: login -> corporate email
+      alice: alice@corp.example
+      bob: bob@corp.example
     access:                                  # what EVERY member gets, per environment
       dev: developer
       stage: developer
@@ -56,6 +58,12 @@ teams:
 | **members** | the people of the team. Removing a name revokes the team-wide access; move it to `left:` to also make lint catch leftovers in `extra` |
 | **access** | the team matrix: environment -> role (or `{ role, ticket }`). Applies to every member |
 | **extra** | individual grants: `who` (one name or a list), `role`, `env`, optional `ticket`, `expires`, `reason`. The team that owns the resource is the one that lists the entry, even if the person belongs to another team |
+
+```yaml
+    members:                       # login: corporate email
+      alice: alice@corp.example
+      bob: bob@corp.example
+```
 
 Rules of thumb: production always needs a `ticket`; a grant to a person in production needs `expires` (max 90 days); the dangerous `break-glass` role needs both and at most 7 days.
 
@@ -89,7 +97,8 @@ access/
 | `explain AAC003` | what a rule means and how to fix it | 0 / 2 |
 | `matrix PATH` | table team x environment: which roles, how many people | 0 |
 | `who PATH PERSON` | all effective access of one person, where it comes from, tickets and expiry | 0 / 2 |
-| `compile PATH [--out build]` | write Vault / Kubernetes / GitLab artifacts | 0 |
+| `changes BASE HEAD [--format text, markdown or json]` | who gained or lost access between two catalogs (e.g. the base branch and a PR), plus accounts to create or remove | 0 / 2 |
+| `compile PATH [--out build]` | write Vault / Kubernetes / GitLab artifacts and `people.json` | 0 |
 | `export-state PATH --vault --kubernetes --gitlab [--out snapshot.json]` | read-only export of the actual state from live systems | 0 / 2 |
 | `diff PATH --actual snapshot.json` | desired vs actual state (areas missing from the snapshot are reported as not checked) | 0 no drift / 1 drift |
 | `review PATH [--days 30]` | expiring and elevated grants | 0 |
@@ -107,7 +116,7 @@ Full copy-paste versions with the CI messages you will see are in [docs/SUPPORT.
 
 | Ticket says... | Edit |
 |---|---|
-| New employee | add the name to `members` of the team |
+| New employee | add `login: email` to `members` of the team (the address is where their account credentials are sent) |
 | Employee left | move the name from `members` to `left`; delete their lines in `extra` |
 | Temporary prod access | add a line to `extra` with `ticket` and `expires` |
 | Emergency access | the same with role `break-glass`, `expires` within 7 days, a `reason` |
@@ -139,6 +148,9 @@ Full copy-paste versions with the CI messages you will see are in [docs/SUPPORT.
 | AAC009 | warning | Duplicate grants. |
 | AAC010 | info | Unused roles and groups. |
 | AAC011 | warning | Grants expiring within 14 days are due for review. |
+| AAC012 | error | With `require_email: true`, every active person has a corporate email. |
+| AAC013 | error | Two people never share one email address. |
+| AAC014 | error | With `email_domains`, emails belong to one of the listed domains. |
 
 `lint` exits 1 on errors (`--strict`: also on warnings), so it works as a required merge-request check. `--today` pins the date for reproducible runs.
 
@@ -151,7 +163,7 @@ AAC003 error: grant #3 (bob -> deployer on payments/prod): direct production gra
 AAC005 error: grant #0 (group:payments-devs -> developer on payments/dev): 'gone' is offboarded
 AAC007 error: 'alice' is both deployer and approver on payments/prod
 ...
-11 error(s), 5 warning(s), 3 info                                   (exit 1)
+14 error(s), 5 warning(s), 3 info                                   (exit 1)
 
 $ access-as-code lint examples/company --today 2026-10-08
 AAC011 warning: grant #5 (erin -> break-glass on devops/prod) [infr.yml]: expires on 2026-10-12
@@ -173,7 +185,7 @@ carol: team portal, active
   sites/stage  viewer  via direct  ticket=SEC-130  expires=-
 
 $ access-as-code compile examples/company --today 2026-10-08 --out build
-wrote 38 files to build
+wrote 39 files to build
 ```
 
 Generated, for example `build/vault/policies/sites-prod-deployer.hcl`:
@@ -244,12 +256,29 @@ A snapshot with none of the four sections is rejected (exit 2). A section that i
 3. After merge: `compile`, apply with your tooling (Terraform Vault provider, `kubectl apply`, GitLab API).
 4. Nightly: `export-state` then `diff`; page on drift.
 
+## Corporate email and personal delivery of account credentials
+
+Some systems need **local accounts** (Vault userpass, local GitLab users, Kubernetes client certificates...). To create them without keeping a password, token or any other secret in the repository, a person has a corporate address and the automation sends the credentials to that mailbox, personally and once:
+
+```yaml
+# common.yml
+require_email: true                 # AAC012: every active person needs an address
+email_domains: [corp.example]       # AAC014: and only a corporate one
+# web.yml
+    members:
+      alice: alice@corp.example     # login: address (bob: with no address is allowed unless require_email is on)
+```
+
+* `compile` writes **`people.json`**: for every person who has effective access it lists `email`, `team`, the `systems` that need an account (`vault`, `kubernetes`, `gitlab`, derived from the roles) and the `access` they get. It contains **no secrets**. The new `changes` command lists the **new accounts to create** and the **accounts no longer needed** in a PR, so the automation knows whom to onboard and offboard.
+* The sending step is yours (it needs your mail relay and your account-creation tooling) and this tool never handles a password. Recommended pattern: generate a one-time password or an invitation/reset link, send it to `people.json` -> `email` from the pipeline, force a change at first login, and keep the secret in no log, artifact or variable.
+* Lint protects the destination: a private domain (AAC014) or a mailbox shared by two people (AAC013) fails the PR, and messages name the person, never the address. The address is personal data: keep the access repository **private** and treat `people.json` as confidential.
+
 ## Pull request check (GitHub Actions)
 
 Copy [examples/ci/github-actions.yml](examples/ci/github-actions.yml) to `.github/workflows/access.yml` of your access repository (5 lines of configuration). It calls the reusable workflow [.github/workflows/access-check.yml](.github/workflows/access-check.yml), which on every PR that touches `access/`:
 
 * validates and lints; findings show up as **annotations on the offending file** and block the merge (`strict: true` also blocks on warnings);
-* writes a **job summary** with the team x environment matrix, expiring/elevated grants and a `diff` of the generated Vault / Kubernetes / GitLab configuration between the base branch and the PR, so a reviewer sees what merging would really change;
+* writes a **job summary** with the team x environment matrix, expiring/elevated grants, **who gained or lost access** (and which accounts to create or remove) and a `diff` of the generated Vault / Kubernetes / GitLab configuration between the base branch and the PR, so a reviewer sees what merging would really change;
 * checks that the catalog compiles. It is read-only and needs no secrets (`permissions: contents: read`).
 
 Make the check **required** (branch protection / ruleset) and add CODEOWNERS so each direction's file needs its own leads' approval. This repository dogfoods it in `.github/workflows/access-pr.yml`. Pin the `uses:` ref to a tag or commit SHA if you want to control updates.
@@ -267,6 +296,6 @@ The original single-file format (`version: 1`: `people`, `groups` and a list of 
 
 ## What is verified
 
-Reproduce with `pip install -e ".[dev]" && pytest` (82 tests): every lint rule (positive, negative and boundary cases such as an expiry exactly 90 days away or a grant expiring today), schema rejection, group resolution, deterministic compilation, exclusion of expired/offboarded access, drift of every kind, CLI exit codes.
+Reproduce with `pip install -e ".[dev]" && pytest` (106 tests): every lint rule (positive, negative and boundary cases such as an expiry exactly 90 days away or a grant expiring today), schema rejection, group resolution, deterministic compilation, exclusion of expired/offboarded access, drift of every kind, CLI exit codes.
 
 **Not verified:** applying the output to real Vault, Kubernetes or GitLab instances; the HCL, RoleBinding and member-level formats follow the public documentation but were never loaded into those systems. `export-state` was tested against fakes only; objects Vault returns for namespaces other than the token's, nested GitLab subgroups and inherited memberships are not exported. Vault policy paths assume KV v2 mounts named `kv-<team>`. The merge of several files and the version 2 flattening are covered by tests (duplicate definitions, ordering, error messages with file names). Roles are per-team and per-environment; finer scoping (single paths, time-of-day) is out of scope.

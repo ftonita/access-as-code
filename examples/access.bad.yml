@@ -3,6 +3,8 @@ version: 1
 teams: [payments, scoring]
 environments: [dev, stage, prod]
 production_environments: [prod]
+require_email: true                 # AAC012: every active person needs a corporate address
+email_domains: [corp.example]       # AAC014: and it must be on one of these domains
 
 roles:
   viewer:      { vault: [read, list], kubernetes: view, gitlab: reporter }
@@ -14,10 +16,11 @@ roles:
   unused-role: { vault: [read] }
 
 people:
-  alice: { team: payments, status: active }
-  bob:   { team: payments, status: active }
+  alice: { team: payments, status: active }                                    # no email -> AAC012
+  bob:   { team: payments, status: active, email: bob@corp.example }
   gone:  { team: payments, status: offboarded }
-  dave:  { team: scoring,  status: active }
+  dave:  { team: scoring,  status: active, email: bob@corp.example }          # same mailbox as bob -> AAC013
+  erin:  { team: scoring,  status: active, email: erin@gmail.com }            # private domain -> AAC014
 
 groups:
   payments-devs: [alice, gone]

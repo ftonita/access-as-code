@@ -14,4 +14,7 @@ HOWTO = {
     "AAC009": "Delete the duplicate line; keep the one with the right ticket and expiry.",
     "AAC010": "Delete the unused role/group, or add the grant you forgot. Informational only.",
     "AAC011": "Decide before the date: remove the grant, or renew it with a new ticket and expiry. Warning only (use `lint --strict` to make it block).",
+    "AAC012": "Add the person's corporate address: in a team use the mapping form `members: { alice: alice@corp.example }`. People without an address cannot receive their local-account credentials.",
+    "AAC013": "Each person needs their own mailbox, because credentials are sent personally. Fix the typo, or remove the duplicate person.",
+    "AAC014": "Use the person's corporate address (the domains are listed under `email_domains` in common.yml). Credentials must never go to a private mailbox.",
 }

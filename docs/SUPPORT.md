@@ -18,13 +18,15 @@ Useful questions before you edit: `access-as-code who access alice` ("what does 
 Indentation is spaces, never tabs. Names are lowercase (`alice`, `sys-adm`). A date is `YYYY-MM-DD`.
 
 ### 1. New employee joins a team
-Add the login to `members` (it must equal their login in Kubernetes/Vault/GitLab). They get the team's standard access automatically.
+Add `login: corporate email` to `members`. The login must equal their login in Kubernetes/Vault/GitLab; the email is where their account credentials will be sent, so it must be their own corporate address (not a private one). They get the team's standard access automatically.
 ```yaml
-    members: [alice, bob, newbie]      # <- add the name
+    members:
+      alice: alice@corp.example
+      newbie: newbie@corp.example      # <- add the line
 ```
 
 ### 2. Employee leaves the company
-Move the name from `members` to `left`, and delete every line that mentions them under `extra` (in **all** files: `grep -rn name access/`).
+Move the name from `members` (delete the whole `login: email` line) to `left`, and delete every line that mentions them under `extra` (in **all** files: `grep -rn name access/`).
 ```yaml
     members: [alice, bob]
     left: [newbie]
@@ -92,6 +94,9 @@ Unsure which role? Ask the ticket author what they must *do*, then pick the smal
 | `AAC005 ... is offboarded` | recipe 2: remove the leftover lines |
 | `AAC006 ... expired on ...` | delete the line |
 | `AAC007 ... both deployer and approver` | give the two roles to different people |
+| `AAC012 ... has no email` | add `login: name@corp.example` in `members` |
+| `AAC013 ... share one email address` | each person needs their own mailbox: fix the typo |
+| `AAC014 ... email domain ... is not allowed` | use the corporate address, never a private mailbox |
 | `AAC002 ... unknown ...` | typo in a name, or the person/team is not declared |
 | `web.yml: teams.sites.extra[1]: 'env' is a required property` | a field is missing in the 2nd `extra` line of team `sites` in `web.yml` |
 | `person 'x' is defined in web.yml and again in infr.yml` | the same login is in two teams; keep one |

@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from . import __version__
+from .changes import compare, render_markdown, render_text
 from .compile import compile_access, effective, write
 from .demo import make_drifted_state
 from .drift import AREAS, diff, unchecked
@@ -231,6 +232,37 @@ def _cmd_who(a: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_changes(a: argparse.Namespace) -> int:
+    if Path(a.base).exists():
+        base = load(a.base)
+    elif a.base_may_be_missing:
+        base = None  # a brand-new catalog: everything is new
+    else:
+        raise AccessFileError(
+            [f"{a.base} does not exist (pass --base-may-be-missing for a brand-new catalog)"]
+        )
+    report = compare(base, load(a.head), _today(a))
+    changes = report.changes
+    if a.format == "json":
+        rows = [
+            {
+                "kind": c.kind,
+                "person": c.key[0],
+                "team": c.key[1],
+                "env": c.key[2],
+                "role": c.key[3],
+                "old": c.old and c.old.as_dict(),
+                "new": c.new and c.new.as_dict(),
+            }
+            for c in changes
+        ]
+        out = {"changes": rows, "new_accounts": report.new_accounts, "gone_accounts": report.gone_accounts}
+        print(json.dumps(out, indent=2))
+    else:
+        print((render_markdown if a.format == "markdown" else render_text)(report))
+    return 0
+
+
 def _cmd_schema(_: argparse.Namespace) -> int:
     print(json.dumps(SCHEMA_V2, indent=2))
     return 0
@@ -278,6 +310,13 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--out", default="access")
     add("matrix", _cmd_matrix, "who has how many of which roles per team and environment")
     add("who", _cmd_who, "effective access of one person").add_argument("person")
+    ch = add("changes", _cmd_changes, "who gained or lost access between two catalogs", file=False)
+    ch.add_argument("base", help="the old catalog (file or directory)")
+    ch.add_argument(
+        "--base-may-be-missing", action="store_true", help="a missing base means a brand-new catalog"
+    )
+    ch.add_argument("head", help="the new catalog")
+    ch.add_argument("--format", choices=["text", "markdown", "json"], default="text")
     add(
         "schema",
         _cmd_schema,

@@ -2,6 +2,19 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/).
 
+## [1.3.0] - 2026-10-09
+
+### Added
+- `changes BASE HEAD`: who gained or lost access between two catalogs, access whose expiry or source changed, and
+  the local accounts to create or remove; used in the pull request summary.
+- Corporate `email` per person (`members: { alice: alice@corp.example }` in version 2, `email:` in version 1) with
+  lint rules AAC012 (`require_email`), AAC013 (shared mailbox) and AAC014 (`email_domains`); messages never print the
+  address. `compile` writes `people.json` (email, team, systems, access; no secrets) so credentials of local accounts
+  can be sent to the person without storing a password anywhere.
+
+### Changed
+- A duplicate key in a YAML file is an error instead of silently keeping the last one.
+
 ## [1.2.0] - 2026-10-09
 
 ### Added

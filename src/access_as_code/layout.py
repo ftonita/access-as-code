@@ -21,6 +21,22 @@ class _Loader(yaml.SafeLoader):
     """SafeLoader that keeps `2026-12-01` a string (validated by the schema) instead of a date object."""
 
 
+def _no_duplicate_keys(loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False) -> dict:
+    seen: set[Any] = set()
+    for key_node, _ in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in seen:
+            raise yaml.constructor.ConstructorError(
+                None,
+                None,
+                f"duplicate key '{key}' (YAML would silently keep only the last one)",
+                key_node.start_mark,
+            )
+        seen.add(key)
+    return yaml.SafeLoader.construct_mapping(loader, node, deep=deep)
+
+
+_Loader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_duplicate_keys)
 _Loader.yaml_implicit_resolvers = {
     k: [(tag, rx) for tag, rx in v if tag != "tag:yaml.org,2002:timestamp"]
     for k, v in yaml.SafeLoader.yaml_implicit_resolvers.items()
@@ -68,15 +84,18 @@ def flatten(doc: dict[str, Any], source: str, problems: list[str]) -> tuple[dict
     groups: dict[str, Any] = dict(doc.get("groups", {}))
     grants: list[dict[str, Any]] = []
 
-    def claim(pid: str, team: str, status: str) -> None:
+    def claim(pid: str, team: str, status: str, email: str | None = None) -> None:
         if pid in people:
             problems.append(f"{source}: '{pid}' is listed under both '{people[pid]['team']}' and '{team}'")
-        people[pid] = {"team": team, "status": status}
+        people[pid] = {"team": team, "status": status, **({"email": email} if email else {})}
 
     for team, t in doc.get("teams", {}).items():
-        members, left = t.get("members", []), t.get("left", [])
+        raw_members = t.get("members", [])
+        members = list(raw_members)  # a mapping iterates over its ids
+        emails = raw_members if isinstance(raw_members, dict) else {}
+        left = t.get("left", [])
         for pid in members:
-            claim(pid, team, "active")
+            claim(pid, team, "active", emails.get(pid))
         for pid in left:
             if pid in members:
                 problems.append(f"{source}: teams.{team}: '{pid}' is both in members and in left")
@@ -101,6 +120,7 @@ def flatten(doc: dict[str, Any], source: str, problems: list[str]) -> tuple[dict
         "teams": list(doc.get("teams", {})),
         "environments": doc.get("environments", []),
         "production_environments": doc.get("production_environments"),
+        "settings": {k: doc[k] for k in ("require_email", "email_domains") if k in doc},
         "roles": doc.get("roles", {}),
         "people": people,
         "groups": groups,
@@ -121,6 +141,7 @@ def merge(parts: list[tuple[str, dict[str, Any], list[str]]]) -> tuple[dict[str,
         "groups": {},
         "grants": [],
     }
+    settings: dict[str, Any] = {}
     prod: list[str] = []
     prod_given = False
     sources: list[str] = []
@@ -148,6 +169,9 @@ def merge(parts: list[tuple[str, dict[str, Any], list[str]]]) -> tuple[dict[str,
             for name, value in frag[kind].items():
                 if claim(_SINGULAR[kind], name, source):
                     out[kind][name] = value
+        for key, value in frag["settings"].items():
+            if claim("setting", key, source):
+                settings[key] = value
         out["grants"].extend(frag["grants"])
         sources.extend(grant_sources)
     if not out["roles"]:
@@ -158,6 +182,7 @@ def merge(parts: list[tuple[str, dict[str, Any], list[str]]]) -> tuple[dict[str,
         )
     if problems:
         raise AccessFileError(problems)
+    out.update(settings)
     if prod_given:
         out["production_environments"] = prod
     return out, sources

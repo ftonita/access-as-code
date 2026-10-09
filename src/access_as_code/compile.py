@@ -48,6 +48,7 @@ class Artifacts:
     vault_groups: dict[str, list[str]]
     kubernetes: dict[str, list[str]]  # "<ns>/<level>" -> members
     gitlab: dict[str, dict[str, str]]  # team -> {person: level}
+    people: dict[str, dict[str, Any]]  # active people with effective access: email, team, systems, access
 
     def as_state(self) -> dict[str, Any]:
         return {
@@ -63,8 +64,19 @@ def compile_access(acc: Access, today: date) -> Artifacts:
     groups: dict[str, set[str]] = {}
     k8s: dict[str, set[str]] = {}
     gitlab: dict[str, dict[str, str]] = {}
+    people: dict[str, dict[str, Any]] = {}
     for g, pid in effective(acc, today):
         role = acc.roles[g.role]
+        entry = people.setdefault(
+            pid,
+            {"email": acc.people[pid].email, "team": acc.people[pid].team, "systems": set(), "access": set()},
+        )
+        entry["access"].add(f"{g.team}/{g.env}:{g.role}")
+        entry["systems"].update(
+            s
+            for s, on in (("vault", role.vault), ("kubernetes", role.kubernetes), ("gitlab", role.gitlab))
+            if on
+        )
         if role.vault:
             name = f"{g.team}-{g.env}-{role.name}"
             policies[name] = policy_hcl(g.team, g.env, role.vault)
@@ -80,6 +92,10 @@ def compile_access(acc: Access, today: date) -> Artifacts:
         {k: sorted(v) for k, v in sorted(groups.items())},
         {k: sorted(v) for k, v in sorted(k8s.items())},
         {t: dict(sorted(m.items())) for t, m in sorted(gitlab.items())},
+        {
+            p: {**e, "systems": sorted(e["systems"]), "access": sorted(e["access"])}
+            for p, e in sorted(people.items())
+        },
     )
 
 
@@ -116,5 +132,7 @@ def write(art: Artifacts, out: str | Path) -> list[Path]:
             f"kubernetes/{key.replace('/', '--')}.yaml",
             yaml.safe_dump(rolebinding(key, members), sort_keys=False),
         )
+    # Who needs an account where, and where to send the personal credentials. No secrets in here.
+    put("people.json", json.dumps(art.people, indent=2) + "\n")
     put("gitlab/members.json", json.dumps(art.gitlab, indent=2) + "\n")
     return written

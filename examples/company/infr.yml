@@ -4,7 +4,9 @@ version: 2
 
 teams:
   devops:
-    members: [erin, frank]
+    members:                         # login: corporate email (credentials are sent there, personally)
+      erin: erin@corp.example
+      frank: frank@corp.example
     access:
       dev: developer
       stage: developer
@@ -15,7 +17,9 @@ teams:
       - { who: erin,  role: break-glass, env: prod, ticket: SEC-120, expires: 2026-10-12, reason: "incident INC-77" }
 
   sys-adm:
-    members: [grace, heidi]
+    members:                         # login: corporate email (credentials are sent there, personally)
+      grace: grace@corp.example
+      heidi: heidi@corp.example
     access:
       dev: developer
       stage: developer

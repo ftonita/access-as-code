@@ -90,6 +90,14 @@ jobs:
             access-as-code review "$ACCESS_PATH" "${today[@]}" || true
             echo '```'
             echo
+            echo '### Who gained or lost access (base -> this PR)'
+            if [ -e "_base/$ACCESS_PATH" ]; then
+              access-as-code changes "_base/$ACCESS_PATH" "$ACCESS_PATH" "${today[@]}" --format markdown || echo "Could not compare (see the lint step)."
+            else
+              echo "No \`$ACCESS_PATH\` on the base branch: everything below is new."
+              access-as-code changes "_base/$ACCESS_PATH" "$ACCESS_PATH" "${today[@]}" --base-may-be-missing --format markdown || true
+            fi
+            echo
             echo '### Change in generated configuration (base -> this PR)'
             if [ -e "_base/$ACCESS_PATH" ]; then
               if ! access-as-code compile "_base/$ACCESS_PATH" "${today[@]}" --out /tmp/out-base > /tmp/base.log 2>&1; then
@@ -98,12 +106,15 @@ jobs:
               elif ! access-as-code compile "$ACCESS_PATH" "${today[@]}" --out /tmp/out-head > /tmp/head.log 2>&1; then
                 echo "This PR does not compile:"
                 echo '```text'; cat /tmp/head.log; echo '```'
-              elif diff -ru /tmp/out-base /tmp/out-head > /tmp/changes.diff; then
+              elif diff -ru -x people.json /tmp/out-base /tmp/out-head > /tmp/changes.diff   # people.json holds email addresses: never print them; then
                 echo 'No change to Vault policies, Kubernetes bindings or GitLab members.'
               else
+                echo '<details><summary>Show the generated files that differ</summary>'
+                echo
                 echo '```diff'
                 head -n 400 /tmp/changes.diff
                 echo '```'
+                echo '</details>'
               fi
             else
               echo "Not available (no \`$ACCESS_PATH\` on the base branch or not a pull request)."

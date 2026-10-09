@@ -26,7 +26,7 @@ def test_bad_file_triggers_every_rule_id(bad):
 
 def test_bad_file_exact_error_counts(bad):
     vs = lint(bad, TODAY)
-    assert sum(v.severity == "error" for v in vs) == 11
+    assert sum(v.severity == "error" for v in vs) == 14
     assert sum(v.severity == "warning" for v in vs) == 5
 
 

@@ -17,7 +17,7 @@ def test_lint_exit_codes(capsys):
     assert main(["lint", str(GOOD), *T]) == 0
     assert main(["lint", str(GOOD), *T, "--strict"]) == 1  # AAC011 warning
     assert main(["lint", str(BAD), *T]) == 1
-    assert "11 error(s)" in capsys.readouterr().out
+    assert "14 error(s)" in capsys.readouterr().out
 
 
 def test_lint_json(capsys):

@@ -8,6 +8,9 @@ _COMMON_BODY = """\
 environments: [dev, stage, prod]
 production_environments: [prod]   # stricter rules apply here: ticket, expiry, separation of duties
 
+require_email: true               # every active person needs a corporate address (credentials are sent there)
+email_domains: [corp.example]     # replace with your corporate domain(s); private mailboxes are rejected
+
 roles:                            # a role = what it means in Vault / Kubernetes / GitLab
   viewer:    { description: read-only,          vault: [read, list], kubernetes: view, gitlab: reporter }
   developer: { description: daily development,  vault: [read, list], kubernetes: edit, gitlab: developer }
@@ -18,7 +21,9 @@ roles:                            # a role = what it means in Vault / Kubernetes
 _TEAM_BODY = """\
 teams:
   myteam:
-    members: [alice, bob]          # everyone in the team (the id = their login in Kubernetes/Vault/GitLab)
+    members:                       # login: corporate email (the login = their login in Kubernetes/Vault/GitLab)
+      alice: alice@corp.example
+      bob: bob@corp.example
     access:                        # what EVERY member gets, per environment
       dev: developer
       stage: developer

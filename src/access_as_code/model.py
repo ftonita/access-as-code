@@ -28,6 +28,7 @@ class Person:
     id: str
     team: str
     active: bool
+    email: str | None = None  # corporate address for personal delivery of local-account credentials
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,8 @@ class Access:
     people: dict[str, Person]
     groups: dict[str, tuple[str, ...]]
     grants: tuple[Grant, ...]
+    require_email: bool = False
+    email_domains: tuple[str, ...] = ()
 
     def members(self, grant: Grant) -> tuple[str, ...]:
         """People a grant applies to. Unknown subjects/members resolve to nobody (`lint` reports AAC002)."""
@@ -80,7 +83,9 @@ def parse(doc: Any, sources: list[str] | None = None) -> Access:
         n: Role(n, tuple(r.get("vault", ())), r.get("kubernetes"), r.get("gitlab"))
         for n, r in doc["roles"].items()
     }
-    people = {n: Person(n, p["team"], p["status"] == "active") for n, p in doc["people"].items()}
+    people = {
+        n: Person(n, p["team"], p["status"] == "active", p.get("email")) for n, p in doc["people"].items()
+    }
     grants = tuple(
         Grant(
             i,
@@ -103,6 +108,8 @@ def parse(doc: Any, sources: list[str] | None = None) -> Access:
         people,
         {k: tuple(v) for k, v in doc.get("groups", {}).items()},
         grants,
+        doc.get("require_email", False),
+        tuple(d.lower() for d in doc.get("email_domains", ())),
     )
 
 

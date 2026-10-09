@@ -38,6 +38,9 @@ RULES = {
     "AAC009": "Duplicate grants.",
     "AAC010": "Unused roles and groups.",
     "AAC011": "Grants expiring within 14 days are due for review.",
+    "AAC012": "With `require_email: true`, every active person needs a corporate email.",
+    "AAC013": "Two people must not share one email address.",
+    "AAC014": "With `email_domains`, a person's email must belong to one of the listed domains.",
 }
 
 
@@ -60,6 +63,26 @@ def lint(acc: Access, today: date) -> list[Violation]:
         for pid in gmembers:
             if pid not in acc.people:
                 add("AAC002", "error", f"group '{gname}': unknown member '{pid}' (not listed under people)")
+
+    by_email: dict[str, list[str]] = defaultdict(list)
+    for pid, person in sorted(acc.people.items()):
+        if not person.active:
+            continue  # no credentials will ever be sent to a stale record
+        if person.email:
+            by_email[person.email.lower()].append(pid)
+            domain = person.email.rsplit("@", 1)[1].lower()
+            if acc.email_domains and domain not in acc.email_domains:
+                allowed = ", ".join(acc.email_domains)
+                add(
+                    "AAC014",
+                    "error",
+                    f"person '{pid}': email domain '{domain}' is not allowed (allowed: {allowed})",
+                )
+        elif acc.require_email:
+            add("AAC012", "error", f"person '{pid}' has no email (require_email is on)")
+    for pids in by_email.values():
+        if len(pids) > 1:  # the address itself stays out of CI logs
+            add("AAC013", "error", f"people {', '.join(repr(p) for p in pids)} share one email address")
 
     seen: dict[tuple, int] = {}
     used_roles: set[str] = set()

@@ -4,7 +4,9 @@ version: 2
 
 teams:
   sites:
-    members: [alice, bob]            # everyone in the team. Person leaves -> move the name to `left`
+    members:                         # login: corporate email (credentials are sent there, personally)
+      alice: alice@corp.example
+      bob: bob@corp.example
     access:                          # what EVERY member gets, per environment
       dev: developer
       stage: developer
@@ -15,7 +17,9 @@ teams:
       - { who: carol, role: viewer,   env: stage, ticket: SEC-130 }   # carol is from team portal
 
   portal:
-    members: [carol, dave]
+    members:                         # login: corporate email (credentials are sent there, personally)
+      carol: carol@corp.example
+      dave: dave@corp.example
     left: [ivan]                     # left the company: keep here until nothing refers to him
     access:
       dev: developer

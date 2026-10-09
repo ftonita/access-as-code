@@ -18,13 +18,15 @@
 Отступы - пробелы, не табы. Имена строчными (`alice`, `sys-adm`). Дата - `YYYY-MM-DD`.
 
 ### 1. Новый сотрудник пришёл в команду
-Добавьте логин в `members` (он должен совпадать с логином в Kubernetes/Vault/GitLab). Стандартный доступ команды появится автоматически.
+Добавьте `логин: корпоративная почта` в `members`. Логин должен совпадать с логином в Kubernetes/Vault/GitLab; на почту придут данные его учётной записи, поэтому это должен быть его собственный корпоративный адрес (не личный). Стандартный доступ команды появится автоматически.
 ```yaml
-    members: [alice, bob, newbie]      # <- добавили имя
+    members:
+      alice: alice@corp.example
+      newbie: newbie@corp.example      # <- добавили строку
 ```
 
 ### 2. Сотрудник уволился
-Перенесите имя из `members` в `left` и удалите все строки с ним в `extra` (во **всех** файлах: `grep -rn имя access/`).
+Перенесите имя из `members` (строку `логин: почта` удалите целиком) в `left` и удалите все строки с ним в `extra` (во **всех** файлах: `grep -rn имя access/`).
 ```yaml
     members: [alice, bob]
     left: [newbie]
@@ -92,6 +94,9 @@
 | `AAC005 ... is offboarded` | рецепт 2: удалить оставшиеся строки |
 | `AAC006 ... expired on ...` | удалить строку |
 | `AAC007 ... both deployer and approver` | отдать две роли разным людям |
+| `AAC012 ... has no email` | добавить `логин: name@corp.example` в `members` |
+| `AAC013 ... share one email address` | у каждого человека свой ящик: исправьте опечатку |
+| `AAC014 ... email domain ... is not allowed` | укажите корпоративный адрес, не личный |
 | `AAC002 ... unknown ...` | опечатка в имени, либо человек/команда не объявлены |
 | `web.yml: teams.sites.extra[1]: 'env' is a required property` | в 2-й строке `extra` команды `sites` файла `web.yml` не хватает поля |
 | `person 'x' is defined in web.yml and again in infr.yml` | один логин в двух командах; оставьте одну |

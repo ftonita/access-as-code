@@ -7,6 +7,18 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 NAME = {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"}
+EMAIL = r"^[^@\s,;<>]+@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,}$"
+DOMAIN = r"^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,}$"
+# Settings for the corporate address used to deliver local-account credentials personally.
+EMAIL_SETTINGS = {
+    "require_email": {"type": "boolean"},
+    "email_domains": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": True,
+        "items": {"type": "string", "pattern": DOMAIN},
+    },
+}
 CAPS = {"enum": ["create", "read", "update", "delete", "list", "sudo"]}
 
 SCHEMA: dict[str, Any] = {
@@ -18,6 +30,7 @@ SCHEMA: dict[str, Any] = {
         "teams": {"type": "array", "minItems": 1, "items": NAME, "uniqueItems": True},
         "environments": {"type": "array", "minItems": 1, "items": NAME, "uniqueItems": True},
         "production_environments": {"type": "array", "items": NAME, "default": ["prod"]},
+        **EMAIL_SETTINGS,
         "roles": {
             "type": "object",
             "minProperties": 1,
@@ -40,7 +53,11 @@ SCHEMA: dict[str, Any] = {
                 "type": "object",
                 "required": ["team", "status"],
                 "additionalProperties": False,
-                "properties": {"team": NAME, "status": {"enum": ["active", "offboarded"]}},
+                "properties": {
+                    "team": NAME,
+                    "status": {"enum": ["active", "offboarded"]},
+                    "email": {"type": "string", "pattern": EMAIL},
+                },
             },
         },
         "groups": {
@@ -89,6 +106,7 @@ SCHEMA_V2: dict[str, Any] = {
         "version": {"const": 2},
         "environments": SCHEMA["properties"]["environments"],
         "production_environments": SCHEMA["properties"]["production_environments"],
+        **EMAIL_SETTINGS,
         "roles": SCHEMA["properties"]["roles"],
         "groups": SCHEMA["properties"]["groups"],
         "teams": {
@@ -98,7 +116,14 @@ SCHEMA_V2: dict[str, Any] = {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "members": {"type": "array", "items": NAME, "uniqueItems": True},
+                    # a list of ids, or a mapping id -> corporate email (null = no address yet)
+                    "members": {
+                        "type": ["array", "object"],
+                        "items": NAME,
+                        "uniqueItems": True,
+                        "propertyNames": NAME,
+                        "additionalProperties": {"type": ["string", "null"], "pattern": EMAIL},
+                    },
                     "left": {"type": "array", "items": NAME, "uniqueItems": True},
                     "access": {
                         "type": "object",
